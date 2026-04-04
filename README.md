@@ -2,7 +2,7 @@
 title: VeriRL — Verilog RTL Design Environment
 emoji: 🔬
 colorFrom: indigo
-colorTo: gray
+colorTo: slate
 sdk: docker
 pinned: false
 app_port: 8000
