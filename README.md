@@ -185,15 +185,26 @@ docker run -p 8000:8000 verirl-env:latest
 
 ### Deploy to Hugging Face Spaces
 
-**Automated (recommended):**
-GitHub Actions CI/CD validates and deploys on your command:
+**Automatic on every merge to main:**
+GitHub Actions CI/CD pipeline validates, builds Docker image, and deploys:
 
-1. Create a GitHub secret `HF_TOKEN` with your HF API token (repo settings → Secrets)
-2. Go to Actions tab → "Deploy to HF Spaces" → "Run workflow"
-3. Enter your repo ID (e.g., `your-username/verirl-env`)
-4. Space will be live in ~5-10 minutes
+1. Create feature branch: `git checkout -b feature/xyz`
+2. Make changes + create changelog fragment
+3. Create pull request to main
+4. CI checks run (openenv validate, docker build)
+5. Merge to main when checks pass
+6. Auto-deploys to HF Spaces ✓
 
-See [`.github/DEPLOYMENT.md`](.github/DEPLOYMENT.md) for detailed setup.
+**Manual release:**
+To cut a release and publish versioned Docker image:
+
+1. Go to Actions → Release → Run workflow
+2. Enter version (e.g., `0.3.0`)
+3. Workflow publishes to:
+   - `ghcr.io/SupreethRao99/veriRL:v0.3.0` (Docker image)
+   - GitHub Releases (with changelog)
+
+See [`.github/DEPLOYMENT.md`](.github/DEPLOYMENT.md) for details and [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow.
 
 **Manual:**
 ```bash
