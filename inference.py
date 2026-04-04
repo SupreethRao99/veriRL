@@ -130,6 +130,18 @@ def log_end(success: bool, steps: int, rewards: List[float]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def sanitize_error(error_str: str, max_len: int = 80) -> Optional[str]:
+    """Sanitize error message: remove newlines, truncate to max_len."""
+    if not error_str:
+        return None
+    # Replace newlines and multiple spaces with single space
+    sanitized = " ".join(error_str.split())
+    # Truncate
+    if len(sanitized) > max_len:
+        sanitized = sanitized[:max_len]
+    return sanitized
+
+
 def format_observation(obs) -> str:
     """Format a VerirlObservation as a readable context block for the LLM."""
     parts = []
@@ -165,8 +177,9 @@ def parse_action(response_text: str) -> tuple[VerirlAction, Optional[str]]:
             valid_fields = VerirlAction.model_fields
             return VerirlAction(**{k: v for k, v in data.items() if k in valid_fields}), None
         except Exception as exc:
-            return VerirlAction(action_type="submit", message="parse error"), f"parse_error: {str(exc)[:60]}"
-    return VerirlAction(action_type="submit", message="parse error"), "parse_error: no JSON found in response"
+            err = sanitize_error(f"parse_error: {str(exc)}", max_len=60)
+            return VerirlAction(action_type="submit", message="parse error"), err
+    return VerirlAction(action_type="submit", message="parse error"), "parse_error: no JSON found"
 
 
 def action_label(action: VerirlAction) -> str:
@@ -237,7 +250,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 )
                 assistant_text = response.choices[0].message.content or ""
             except Exception as exc:
-                error = str(exc)[:80]
+                error = sanitize_error(str(exc))
                 assistant_text = ""
 
             if assistant_text:
@@ -253,7 +266,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
             try:
                 result = await env.step(action)
             except Exception as exc:
-                error = str(exc)[:80]
+                error = sanitize_error(str(exc))
                 break
 
             obs = result.observation
@@ -262,7 +275,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
 
             # Validate reward is in expected range
             if not (-1.0 <= reward <= 1.0):
-                error = f"reward {reward} outside [-1.0, 1.0]"
+                error = sanitize_error(f"reward {reward} outside [-1.0, 1.0]")
 
             rewards.append(reward)
             steps_taken = step
@@ -320,10 +333,13 @@ async def validate_environment(base_url: str) -> List[str]:
     - Verify grader produces scores in [0.0, 1.0]
     - Verify environment accepts reset/step/submit workflow
 
+    Prints to stderr only (does not interfere with stdout [START]/[STEP]/[END] format).
+
     Returns:
         List of task IDs if validation passes
     """
-    print("\n=== Task Enumeration & Grader Validation ===\n", flush=True)
+    import sys
+    print("\n=== Task Enumeration & Grader Validation ===\n", file=sys.stderr, flush=True)
 
     # Known tasks — these must be in the environment
     task_manifest = [
@@ -347,7 +363,7 @@ async def validate_environment(base_url: str) -> List[str]:
         },
     ]
 
-    print(f"[VALIDATION] Discovered {len(task_manifest)} tasks:\n", flush=True)
+    print(f"[VALIDATION] Discovered {len(task_manifest)} tasks:\n", file=sys.stderr, flush=True)
     for task in task_manifest:
         task_id = task["id"]
         task_name = task["name"]
@@ -355,10 +371,10 @@ async def validate_environment(base_url: str) -> List[str]:
         max_turns = task["max_turns"]
         print(
             f"  • {task_id:20s} {task_name:30s} [{difficulty:6s}] (max_turns: {max_turns})",
-            flush=True,
+            file=sys.stderr, flush=True,
         )
 
-    print("\n[VALIDATION] Testing grader on each task...\n", flush=True)
+    print("\n[VALIDATION] Testing grader on each task...\n", file=sys.stderr, flush=True)
 
     # Test each grader: reset, submit empty, verify score in [0, 1]
     task_ids = []
@@ -373,7 +389,7 @@ async def validate_environment(base_url: str) -> List[str]:
             if not obs.task_spec:
                 print(
                     f"  [{task_id}] WARNING: task_spec is empty",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
 
             # Submit empty code (should score 0)
@@ -384,34 +400,34 @@ async def validate_environment(base_url: str) -> List[str]:
             if final_score is None:
                 print(
                     f"  [{task_id}] ERROR: final_score is None",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
             elif not (0.0 <= final_score <= 1.0):
                 print(
                     f"  [{task_id}] ERROR: final_score {final_score} not in [0, 1]",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
             else:
                 print(
                     f"  [{task_id}] ✓ Grader OK (empty submission scored {final_score:.3f})",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
                 task_ids.append(task_id)
 
         except Exception as exc:
-            print(f"  [{task_id}] ERROR: {exc}", flush=True)
+            print(f"  [{task_id}] ERROR: {exc}", file=sys.stderr, flush=True)
 
     await env.close()
 
     if len(task_ids) == len(task_manifest):
         print(
             f"\n[VALIDATION] ✓ All {len(task_ids)} tasks validated successfully.\n",
-            flush=True,
+            file=sys.stderr, flush=True,
         )
     else:
         print(
             f"\n[VALIDATION] ✗ Only {len(task_ids)}/{len(task_manifest)} tasks validated.\n",
-            flush=True,
+            file=sys.stderr, flush=True,
         )
 
     return task_ids
@@ -423,11 +439,14 @@ async def validate_environment(base_url: str) -> List[str]:
 
 
 async def main() -> None:
+    import sys
+
     # Validate environment and enumerate tasks
     task_ids = await validate_environment(ENV_BASE_URL)
     if not task_ids:
         print(
             "[FATAL] Environment validation failed. Cannot proceed.",
+            file=sys.stderr,
             flush=True,
         )
         return
@@ -443,22 +462,12 @@ async def main() -> None:
     total_elapsed = time.time() - total_start
     mean_score = sum(scores.values()) / len(scores)
 
-    # Validate all scores are in [0, 1]
-    all_scores_valid = all(0.0 <= score <= 1.0 for score in scores.values())
-
+    # Output summary as comment lines (allowed per spec)
     print("\n# Summary", flush=True)
     for task_id, score in scores.items():
-        status = "✓" if 0.0 <= score <= 1.0 else "✗"
-        print(f"#   {status} {task_id:20s}: {score:.3f}", flush=True)
+        print(f"#   {task_id:20s}: {score:.3f}", flush=True)
     print(f"#   {'mean':20s}: {mean_score:.3f}", flush=True)
     print(f"#   total_time: {total_elapsed:.0f}s", flush=True)
-
-    if all_scores_valid:
-        print(f"\n# ✓ Score validation passed: all {len(scores)} scores in [0, 1]",
-              flush=True)
-    else:
-        print(f"\n# ✗ Score validation failed: some scores outside [0, 1]",
-              flush=True)
 
 
 if __name__ == "__main__":
