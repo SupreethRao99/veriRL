@@ -180,18 +180,9 @@ GitHub Actions CI/CD pipeline validates, builds Docker image, and deploys:
 3. Create pull request to main
 4. CI checks run (openenv validate, docker build)
 5. Merge to main when checks pass
-6. Auto-deploys to HF Spaces ✓
+6. Auto-releases + deploys to HF Spaces ✓
 
-**Manual release:**
-To cut a release and publish versioned Docker image:
-
-1. Go to Actions → Release → Run workflow
-2. Enter version (e.g., `0.3.0`)
-3. Workflow publishes to:
-   - `ghcr.io/SupreethRao99/veriRL:v0.3.0` (Docker image)
-   - GitHub Releases (with changelog)
-
-See [`.github/DEPLOYMENT.md`](.github/DEPLOYMENT.md) for details and [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and [.github/DEPLOYMENT.md](.github/DEPLOYMENT.md) for details.
 
 **Manual:**
 ```bash
