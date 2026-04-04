@@ -95,6 +95,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install openenv-core
+        run: pip install openenv-core
+
+      - name: Deploy to HF Spaces
+        run: |
+          openenv push --repo-id Supreeth/verirl-env
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
       - name: Post release info
         run: |
           echo "✓ Release v${{ github.event.inputs.version }} published!"
@@ -102,12 +111,15 @@ jobs:
           echo "Changelog: https://github.com/SupreethRao99/veriRL/blob/main/CHANGELOG.md"
           echo "Release: https://github.com/SupreethRao99/veriRL/releases/tag/v${{ github.event.inputs.version }}"
           echo ""
+          echo "HF Spaces: https://huggingface.co/spaces/Supreeth/verirl-env"
+          echo ""
           echo "Docker Images:"
-          echo "  ghcr.io/SupreethRao99/veriRL:v${{ github.event.inputs.version }}"
-          echo "  ghcr.io/SupreethRao99/veriRL:latest"
+          echo "  ghcr.io/supreethrao99/verirl:v${{ github.event.inputs.version }}"
+          echo "  ghcr.io/supreethrao99/verirl:latest"
+          echo "  ghcr.io/supreethrao99/verirl:stable"
           echo ""
           echo "Pull the image:"
-          echo "  docker pull ghcr.io/SupreethRao99/veriRL:v${{ github.event.inputs.version }}"
+          echo "  docker pull ghcr.io/supreethrao99/verirl:v${{ github.event.inputs.version }}"
           echo ""
           echo "Run the environment:"
-          echo "  docker run -p 8000:8000 ghcr.io/SupreethRao99/veriRL:v${{ github.event.inputs.version }}"
+          echo "  docker run -p 8000:8000 ghcr.io/supreethrao99/verirl:v${{ github.event.inputs.version }}"
