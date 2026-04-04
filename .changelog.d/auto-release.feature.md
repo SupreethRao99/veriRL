@@ -1,0 +1,1 @@
+Automatic releases on every merge to main - each merge now automatically generates changelog, creates version tag, builds Docker images, publishes GitHub release, and deploys to HF Spaces

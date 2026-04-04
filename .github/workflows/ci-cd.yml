@@ -8,7 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   validate:
@@ -44,6 +43,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -116,3 +118,106 @@ jobs:
           echo "✓ Deployment complete!"
           echo "Space URL: https://huggingface.co/spaces/Supreeth/verirl-env"
           echo "Docker image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main"
+
+  release:
+    runs-on: ubuntu-latest
+    name: Auto Release on Main
+    needs: [ deploy ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Install release tools
+        run: pip install towncrier
+
+      - name: Calculate next version
+        id: version
+        run: |
+          NEXT_VERSION=$(python scripts/bump_version.py)
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Generate changelog
+        run: |
+          towncrier build --version ${{ steps.version.outputs.version }} --yes
+
+      - name: Commit and push changelog
+        run: |
+          git add CHANGELOG.md pyproject.toml .changelog.d/
+          git commit -m "Release v${{ steps.version.outputs.version }}"
+          git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
+          git push origin main
+          git push origin v${{ steps.version.outputs.version }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push versioned Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post release info
+        if: success()
+        run: |
+          echo "✓ Release v${{ steps.version.outputs.version }} published!"
+          echo ""
+          echo "Changelog: https://github.com/SupreethRao99/veriRL/blob/main/CHANGELOG.md"
+          echo "Release: https://github.com/SupreethRao99/veriRL/releases/tag/v${{ steps.version.outputs.version }}"
+          echo "HF Spaces: https://huggingface.co/spaces/Supreeth/verirl-env"
+          echo ""
+          echo "Docker Images:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
