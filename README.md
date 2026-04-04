@@ -1,16 +1,3 @@
----
-title: VeriRL — Verilog RTL Design Environment
-emoji: 🔬
-colorFrom: indigo
-colorTo: gray
-sdk: docker
-pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
----
-
 # VeriRL
 
 An OpenEnv environment for training and evaluating language models on synthesizable Verilog RTL design. Agents implement hardware modules for AI-accelerator primitives and receive graded feedback from real EDA tools — not heuristics, not LLM judges.
