@@ -1,0 +1,1 @@
+Remove colorFrom and colorTo from README metadata - let HuggingFace Spaces use default colors to avoid validation errors
