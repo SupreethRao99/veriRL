@@ -1,3 +1,10 @@
+## [0.1.0] - 2026-04-04
+
+Features
+~~~~~~~~
+
+- Implement complete VeriRL Verilog hardware design environment with 3 tasks (MAC unit, AXI-Stream FIFO, 4×4 systolic array), real EDA tool grading (iverilog, yosys), and baseline inference script (#1)
+- Add professional CI/CD pipeline with GitHub Actions, automated Docker builds, semantic versioning via towncrier, and branch protection for production-ready release management (#2)
 # Changelog
 
 All notable changes to this project will be documented in this file.
