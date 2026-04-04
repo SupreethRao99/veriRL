@@ -1,1 +1,0 @@
-Initial release of VeriRL - Verilog RTL Design Environment with 3 hardware design tasks (MAC unit, AXI-Stream FIFO, 4×4 Systolic Array), real EDA tool grading (iverilog, yosys, vvp), and professional CI/CD pipeline with semantic versioning

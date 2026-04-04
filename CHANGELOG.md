@@ -1,3 +1,20 @@
+## [0.1.1] - 2026-04-04
+
+Features
+~~~~~~~~
+
+- Initial release of VeriRL - Verilog RTL Design Environment with 3 hardware design tasks (MAC unit, AXI-Stream FIFO, 4×4 Systolic Array), real EDA tool grading (iverilog, yosys, vvp), and professional CI/CD pipeline with semantic versioning (init)
+- Initial release of VeriRL environment with 3 hardware design tasks, real EDA tool grading, and professional CI/CD pipeline (#2)
+
+Bug Fixes
+~~~~~~~~~
+
+- Fix Docker image tag validation error by converting repository name to lowercase in CI/CD and release workflows (ghcr.io requires lowercase image names) (#3)
+
+Documentation
+~~~~~~~~~~~~~
+
+- Update README.md documentation for clarity (#1)
 ## [0.1.0] - 2026-04-04
 
 Features
