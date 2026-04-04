@@ -15,50 +15,69 @@ This repository includes GitHub Actions workflows for automated validation and d
 
 ## Workflows
 
+### CI/CD Pipeline (`.github/workflows/ci-cd.yml`)
+
+**Triggers:** Every push to `main` (automatic)
+
+**Three jobs run in sequence:**
+1. **Validate** — `openenv validate` (spec compliance)
+2. **Docker Build** — builds Docker image (Dockerfile validation)
+3. **Deploy** — runs `openenv push` to HF Spaces (only if 1 & 2 pass)
+
+**Status:** Visible in repo Actions tab. Green checkmark = all passed & deployed.
+
 ### Validate Workflow (`.github/workflows/validate.yml`)
 
-**Triggers:** Every push to `main` and pull requests
+**Triggers:** Pull requests and manual pushes to branches
 
 **What it does:**
 1. Installs dependencies via `uv sync`
 2. Runs `openenv validate` — ensures spec compliance
 3. Builds Docker image — verifies Dockerfile works
 
-**Status:** Visible in repo "Actions" tab or PR checks
+**Status:** Visible as PR checks
 
-### Deploy Workflow (`.github/workflows/deploy.yml`)
+### Deploy Workflow (`.github/workflows/deploy.yml`) — Optional
 
-**Triggers:** Manual (workflow_dispatch)
+**Triggers:** Manual workflow_dispatch (for custom deployment)
 
-**What it does:**
-1. Validates environment
-2. Builds Docker image
-3. Runs `openenv push` to deploy to HF Spaces
-4. Prints deployment URL
+**When to use:** If you want to deploy with a different `repo_id` or to a private space
 
-## Deploying to HF Spaces
-
-### Option 1: Manual Trigger (Recommended for Testing)
-
+**Steps:**
 1. Go to https://github.com/SupreethRao99/veriRL/actions
-2. Click "Deploy to HF Spaces" workflow
+2. Click "Deploy to HF Spaces"
 3. Click "Run workflow"
 4. Fill in inputs:
-   - **repo_id**: `Supreeth/verirl-env` (your target space)
-   - **private**: `false` (or `true` for private spaces)
+   - **repo_id**: `your-org/your-space`
+   - **private**: `true` or `false`
 5. Click "Run workflow"
-6. Wait for completion (check logs)
-7. Space URL will be printed: `https://huggingface.co/spaces/Supreeth/verirl-env`
 
-### Option 2: Local Deployment
+## Automatic Deployment
 
-If CI/CD deployment fails, deploy locally:
+Once you have `HF_TOKEN` secret configured, deployment is **automatic**:
+
+1. **Every push to main triggers CI/CD:**
+   - Validates environment ✓
+   - Builds Docker image ✓
+   - Deploys to HF Spaces ✓
+
+2. **Check deployment status:**
+   - Go to https://github.com/SupreethRao99/veriRL/actions
+   - Click latest "CI/CD" workflow run
+   - All 3 jobs should be green (✓)
+
+3. **Your space is live at:**
+   ```
+   https://huggingface.co/spaces/Supreeth/verirl-env
+   ```
+
+## Local Deployment (Backup)
+
+If automated deployment fails:
 
 ```bash
 export HF_TOKEN=<your_hf_token>
 openenv push --repo-id Supreeth/verirl-env
-# or for private space
-openenv push --repo-id Supreeth/verirl-env --private
 ```
 
 ## Troubleshooting
