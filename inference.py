@@ -260,6 +260,10 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
             reward = result.reward or 0.0
             done = result.done
 
+            # Validate reward is in expected range
+            if not (-1.0 <= reward <= 1.0):
+                error = f"reward {reward} outside [-1.0, 1.0]"
+
             rewards.append(reward)
             steps_taken = step
             log_step(step, action_label(action), reward, done, error)
@@ -272,6 +276,13 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 break
 
         success = final_score >= SUCCESS_SCORE_THRESHOLD
+
+        # Validate final_score is in [0, 1]
+        if not (0.0 <= final_score <= 1.0):
+            print(
+                f"[WARNING] Task {task_id}: final_score {final_score} not in [0, 1]",
+                flush=True,
+            )
 
     finally:
         # Safety net: if loop exited without a submit (e.g. connection drop),
@@ -297,28 +308,157 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Task Enumeration & Validation
+# ---------------------------------------------------------------------------
+
+
+async def validate_environment(base_url: str) -> List[str]:
+    """
+    Validate that the environment is operational and all tasks are discoverable.
+
+    Enumerates all three tasks and tests the grader on each:
+    - Verify grader produces scores in [0.0, 1.0]
+    - Verify environment accepts reset/step/submit workflow
+
+    Returns:
+        List of task IDs if validation passes
+    """
+    print("\n=== Task Enumeration & Grader Validation ===\n", flush=True)
+
+    # Known tasks — these must be in the environment
+    task_manifest = [
+        {
+            "id": "mac_unit",
+            "name": "Pipelined MAC Unit",
+            "difficulty": "easy",
+            "max_turns": 8,
+        },
+        {
+            "id": "axi_fifo",
+            "name": "AXI-Stream FIFO",
+            "difficulty": "medium",
+            "max_turns": 10,
+        },
+        {
+            "id": "systolic_array",
+            "name": "4x4 Systolic Array",
+            "difficulty": "hard",
+            "max_turns": 12,
+        },
+    ]
+
+    print(f"[VALIDATION] Discovered {len(task_manifest)} tasks:\n", flush=True)
+    for task in task_manifest:
+        task_id = task["id"]
+        task_name = task["name"]
+        difficulty = task["difficulty"]
+        max_turns = task["max_turns"]
+        print(
+            f"  • {task_id:20s} {task_name:30s} [{difficulty:6s}] (max_turns: {max_turns})",
+            flush=True,
+        )
+
+    print("\n[VALIDATION] Testing grader on each task...\n", flush=True)
+
+    # Test each grader: reset, submit empty, verify score in [0, 1]
+    task_ids = []
+    env = verirl_env(base_url=base_url)
+
+    for task in task_manifest:
+        task_id = task["id"]
+        try:
+            result = await env.reset(task_id=task_id)
+            obs = result.observation
+
+            if not obs.task_spec:
+                print(
+                    f"  [{task_id}] WARNING: task_spec is empty",
+                    flush=True,
+                )
+
+            # Submit empty code (should score 0)
+            result = await env.step(VerirlAction(action_type="submit"))
+            obs = result.observation
+            final_score = obs.final_score
+
+            if final_score is None:
+                print(
+                    f"  [{task_id}] ERROR: final_score is None",
+                    flush=True,
+                )
+            elif not (0.0 <= final_score <= 1.0):
+                print(
+                    f"  [{task_id}] ERROR: final_score {final_score} not in [0, 1]",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"  [{task_id}] ✓ Grader OK (empty submission scored {final_score:.3f})",
+                    flush=True,
+                )
+                task_ids.append(task_id)
+
+        except Exception as exc:
+            print(f"  [{task_id}] ERROR: {exc}", flush=True)
+
+    await env.close()
+
+    if len(task_ids) == len(task_manifest):
+        print(
+            f"\n[VALIDATION] ✓ All {len(task_ids)} tasks validated successfully.\n",
+            flush=True,
+        )
+    else:
+        print(
+            f"\n[VALIDATION] ✗ Only {len(task_ids)}/{len(task_manifest)} tasks validated.\n",
+            flush=True,
+        )
+
+    return task_ids
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 async def main() -> None:
+    # Validate environment and enumerate tasks
+    task_ids = await validate_environment(ENV_BASE_URL)
+    if not task_ids:
+        print(
+            "[FATAL] Environment validation failed. Cannot proceed.",
+            flush=True,
+        )
+        return
+
     llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    tasks = ["mac_unit", "axi_fifo", "systolic_array"]
     scores: dict[str, float] = {}
     total_start = time.time()
 
-    for task_id in tasks:
+    for task_id in task_ids:
         scores[task_id] = await run_task(task_id, llm)
 
     total_elapsed = time.time() - total_start
     mean_score = sum(scores.values()) / len(scores)
 
+    # Validate all scores are in [0, 1]
+    all_scores_valid = all(0.0 <= score <= 1.0 for score in scores.values())
+
     print("\n# Summary", flush=True)
     for task_id, score in scores.items():
-        print(f"#   {task_id:20s}: {score:.3f}", flush=True)
+        status = "✓" if 0.0 <= score <= 1.0 else "✗"
+        print(f"#   {status} {task_id:20s}: {score:.3f}", flush=True)
     print(f"#   {'mean':20s}: {mean_score:.3f}", flush=True)
     print(f"#   total_time: {total_elapsed:.0f}s", flush=True)
+
+    if all_scores_valid:
+        print(f"\n# ✓ Score validation passed: all {len(scores)} scores in [0, 1]",
+              flush=True)
+    else:
+        print(f"\n# ✗ Score validation failed: some scores outside [0, 1]",
+              flush=True)
 
 
 if __name__ == "__main__":
