@@ -185,9 +185,19 @@ docker run -p 8000:8000 verirl-env:latest
 
 ### Deploy to Hugging Face Spaces
 
+**Automated (recommended):**
+GitHub Actions CI/CD validates and deploys on your command:
+
+1. Create a GitHub secret `HF_TOKEN` with your HF API token (repo settings → Secrets)
+2. Go to Actions tab → "Deploy to HF Spaces" → "Run workflow"
+3. Enter your repo ID (e.g., `your-username/verirl-env`)
+4. Space will be live in ~5-10 minutes
+
+See [`.github/DEPLOYMENT.md`](.github/DEPLOYMENT.md) for detailed setup.
+
+**Manual:**
 ```bash
-openenv push
-# or to a specific repo
+export HF_TOKEN=<your_hf_token>
 openenv push --repo-id your-org/verirl-env
 ```
 
