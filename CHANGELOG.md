@@ -1,3 +1,20 @@
+## [0.2.0] - 2026-04-04
+
+Features
+~~~~~~~~
+
+- Automatic releases on every merge to main - each merge now automatically generates changelog, creates version tag, builds Docker images, publishes GitHub release, and deploys to HF Spaces (auto-release)
+
+Bug Fixes
+~~~~~~~~~
+
+- Remove colorFrom and colorTo from README metadata - let HuggingFace Spaces use default colors to avoid validation errors (hf-colors)
+- Fix HuggingFace Spaces metadata validation - change colorTo from gray to slate (valid HF color) (hf-metadata)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+-  (workflow)
 ## [0.1.1] - 2026-04-04
 
 Features
