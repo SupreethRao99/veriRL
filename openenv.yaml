@@ -1,0 +1,62 @@
+spec_version: 1
+name: verirl_env
+display_name: VeriRL — Verilog RTL Design Environment
+description: >
+  An OpenEnv environment for training and evaluating language model agents on
+  synthesizable Verilog RTL design. Agents write hardware modules for
+  AI-accelerator primitives (MAC unit, AXI-Stream FIFO, 4×4 systolic array)
+  and receive graded feedback from real EDA tools (iverilog, yosys).
+  Grading is deterministic and tool-based — not heuristic.
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
+tasks:
+  - id: mac_unit
+    name: Pipelined MAC Unit
+    difficulty: easy
+    max_turns: 8
+    description: >
+      Design a 2-stage pipelined multiply-accumulate unit for signed 8-bit
+      integers with a 32-bit accumulator. Output is valid 2 clock cycles after
+      inputs are presented.
+
+  - id: axi_fifo
+    name: AXI-Stream FIFO
+    difficulty: medium
+    max_turns: 10
+    description: >
+      Implement a 4-entry FIFO with correct AXI4-Stream valid/ready handshaking
+      on both slave and master interfaces, including backpressure and no-drop
+      guarantees under downstream stall.
+
+  - id: systolic_array
+    name: 4x4 Systolic Array
+    difficulty: hard
+    max_turns: 12
+    description: >
+      Design a weight-stationary 4×4 systolic array computing C = A × B for
+      INT8 activations and INT4 weights. The done signal must assert within
+      7 clock cycles of the start pulse, requiring correct diagonal skewing
+      of activation inputs.
+
+actions:
+  - name: write_file
+    description: Submit a complete Verilog module source file
+  - name: run_compile
+    description: Syntax and elaboration check via iverilog
+  - name: run_sim
+    description: Functional simulation against the task testbench via vvp
+  - name: run_synth
+    description: Synthesis and cell-count estimation via yosys
+  - name: submit
+    description: Grade the current submission and end the episode
+
+reward:
+  type: dense
+  range: [0.0, 1.0]
+  description: >
+    Per-step signal based on compile status, simulation pass rate, and a
+    time-efficiency penalty. Final score is a weighted combination of
+    compile, simulation, timing, and area dimensions evaluated by EDA tools.

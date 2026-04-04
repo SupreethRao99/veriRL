@@ -1,0 +1,43 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-verirl_env"
+version = "0.1.0"
+description = "Verilog hardware design environment for OpenEnv — trains LLMs to write RTL for AI-accelerator primitives"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=2.30.0",
+    # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
+    "openenv-core[core]>=0.2.2",
+    # For loading .env files in inference.py
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+# Server entry point - enables running via: uv run --project . server
+# or: python -m verirl_env.server.app
+server = "verirl_env.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["verirl_env", "verirl_env.server"]
+package-dir = { "verirl_env" = ".", "verirl_env.server" = "server" }
+
+[tool.setuptools.package-data]
+verirl_env = ["**/*.yaml", "**/*.yml", "problems/**/*.v", "problems/**/*.md"]
