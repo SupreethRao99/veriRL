@@ -89,6 +89,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
