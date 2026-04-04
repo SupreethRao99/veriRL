@@ -145,16 +145,13 @@ fi
 log "  Found Dockerfile in $DOCKER_CONTEXT"
 
 BUILD_OK=false
-BUILD_LOG=$(portable_mktemp "validate-docker-build")
-CLEANUP_FILES+=("$BUILD_LOG")
-
-run_with_timeout "$DOCKER_BUILD_TIMEOUT" docker build "$DOCKER_CONTEXT" > "$BUILD_LOG" 2>&1 && BUILD_OK=true
+BUILD_OUTPUT=$(run_with_timeout "$DOCKER_BUILD_TIMEOUT" docker build "$DOCKER_CONTEXT" 2>&1) && BUILD_OK=true
 
 if [ "$BUILD_OK" = true ]; then
   pass "Docker build succeeded"
 else
   fail "Docker build failed (timeout=${DOCKER_BUILD_TIMEOUT}s)"
-  tail -20 "$BUILD_LOG"
+  printf "%s\n" "$BUILD_OUTPUT" | tail -20
   stop_at "Step 2"
 fi
 
