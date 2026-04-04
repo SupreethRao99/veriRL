@@ -48,22 +48,22 @@ python inference.py
 **Output Format (STDOUT only):**
 ```
 [START] task=mac_unit env=verirl model=openai/gpt-oss-120b
-[STEP] step=1 action=write_file(...) reward=0.01 done=false error=null
+[STEP] step=1 action=write_file(2313chars) reward=0.01 done=false error=null
 [STEP] step=2 action=submit reward=0.00 done=true error=null
 [END] success=false steps=2 rewards=0.01,0.00
-...
-# Summary
-#   mac_unit            : 0.154
-#   axi_fifo            : 0.629
-#   systolic_array      : 0.000
-#   mean                : 0.261
-#   total_time: 47s
+[START] task=axi_fifo env=verirl model=openai/gpt-oss-120b
+[STEP] step=1 action=submit reward=-0.01 done=true error=null
+[END] success=false steps=1 rewards=-0.01
+[START] task=systolic_array env=verirl model=openai/gpt-oss-120b
+[STEP] step=1 action=submit reward=-0.01 done=true error=parse_error: Unterminated string starting at: line 3 column
+[END] success=false steps=1 rewards=-0.01
 ```
 
 **Checklist:**
 - ✓ Script completes without errors
+- ✓ STDOUT contains ONLY [START], [STEP], [END] lines (no other output)
 - ✓ Produces valid scores (all in [0.0, 1.0])
-- ✓ Runtime < 20 minutes (typically 45-60 seconds)
+- ✓ Runtime < 20 minutes (typically 30-60 seconds)
 - ✓ Uses OpenAI Client for all LLM calls
 - ✓ Runs on machine with vcpu=2, memory=8GB
 
@@ -101,14 +101,16 @@ python inference.py
 - ✓ Uses environment variables: API_BASE_URL, MODEL_NAME, HF_TOKEN, ENV_BASE_URL
 - ✓ Supports .env file via `load_dotenv()`
 
-**STDOUT Format (exact specification):**
-- ✓ [START] line with fields: task, env, model (no deviation)
-- ✓ [STEP] line with fields: step, action, reward, done, error (in order)
-- ✓ [END] line with fields: success, steps, rewards (in order)
+**STDOUT Format (exact specification — CRITICAL):**
+- ✓ STDOUT contains ONLY [START], [STEP], [END] lines — NO OTHER OUTPUT
+- ✓ [START] line with fields: task, env, model (in exact order, no deviation)
+- ✓ [STEP] line with fields: step, action, reward, done, error (in exact order, no deviation)
+- ✓ [END] line with fields: success, steps, rewards (in exact order, no deviation)
 - ✓ reward/rewards formatted to 2 decimal places (e.g., 0.02)
 - ✓ done/success lowercase booleans: true or false
-- ✓ error is raw error string (max 80 chars) or null
-- ✓ All fields single-line (no newlines in error messages)
+- ✓ error is raw error string (max 80 chars) or null — single line, no newlines
+- ✓ NO validation output, NO comments, NO summary lines
+- ✓ Every line matches pattern exactly: `[TYPE] field1=value1 field2=value2 ...`
 
 **Environment Configuration:**
 - ✓ `API_BASE_URL` — configurable, defaults to HF router
@@ -165,11 +167,17 @@ python inference.py
    python inference.py                 # Must complete in < 20 min
    ```
 
-2. **Check STDOUT format:**
+2. **Verify STDOUT format is EXACT:**
    ```bash
-   python inference.py 2>/dev/null | grep -E "^\[(START|STEP|END)\]" | head -10
+   # Should show ONLY [START], [STEP], [END] lines with NO other output
+   python inference.py 2>/dev/null | head -20
+   
+   # Verify every line matches pattern
+   python inference.py 2>/dev/null | grep -v "^\[START\]" | grep -v "^\[STEP\]" | grep -v "^\[END\]" | wc -l
+   # ^ Should output: 0 (zero extra lines)
    ```
-   All lines must start with `[START]`, `[STEP]`, or `[END]` — no other output to stdout.
+   
+   **Critical:** Any deviation in field names, ordering, or extraneous output will fail automated evaluation.
 
 3. **Verify environment variables:**
    ```bash
