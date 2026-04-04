@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openenv-verirl_env"
-version = "0.2.0"
+version = "0.1.0"
 description = "Verilog hardware design environment for OpenEnv — trains LLMs to write RTL for AI-accelerator primitives"
 requires-python = ">=3.10"
 dependencies = [
