@@ -1,0 +1,1 @@
+Fix HuggingFace Spaces metadata validation - change colorTo from gray to slate (valid HF color)
