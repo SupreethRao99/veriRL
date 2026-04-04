@@ -193,7 +193,7 @@ openenv push --repo-id your-org/verirl-env
 
 ## Baseline Scores
 
-Baseline agent: model resolved to `openai/gpt-oss-120b` via Groq inference router.
+Baseline agent: `openai/gpt-oss-120b` via Hugging Face inference router.
 
 | Task | Difficulty | Score |
 |---|---|---|
@@ -201,6 +201,18 @@ Baseline agent: model resolved to `openai/gpt-oss-120b` via Groq inference route
 | axi_fifo | medium | 0.650 |
 | systolic_array | hard | 0.000 |
 | **mean** | | **0.268** |
+
+**Validation:**
+The inference script includes task enumeration and grader validation (run before inference):
+- All 3 tasks discovered: `mac_unit`, `axi_fifo`, `systolic_array`
+- All graders tested with empty submission → all score 0.0 (valid)
+- All per-step rewards in valid range [-1.0, 1.0]
+- All final scores in valid range [0.0, 1.0]
+
+**Interpretation:**
+- MAC unit (easy): 0.154 — some compilation/simulation credit, but test failures
+- AXI FIFO (medium): 0.650 — good protocol understanding, partial correctness on edge cases  
+- Systolic array (hard): 0.000 — did not attempt (timing constraint is challenging)
 
 ## Project Structure
 
