@@ -1,21 +1,12 @@
-// Reference implementation: weight-stationary 4x4 systolic array
-//
-// Architecture:
-//   - Row i's activation is delayed by i cycles (diagonal skewing via row-gated enable)
-//   - PE[i][j] accumulates exactly 4 times: at cycles i, i+1, i+2, i+3
-//   - Row 3 finishes last (cycles 3..6), so done_reg fires at cyc==6
-//   - done wire is high for one cycle at posedge 7 from start
-//   - output[i][j] = 4 * activations[i] * weights[i][j]
-
 module systolic_array (
-    input  wire        clk,
-    input  wire        rst,
-    input  wire        load_weights,
-    input  wire [63:0] weights_flat,
-    input  wire        start,
+    input  wire         clk,
+    input  wire         rst,
+    input  wire         load_weights,
+    input  wire [63:0]  weights_flat,
+    input  wire         start,
     input  wire [127:0] activations_flat,
     output wire [255:0] outputs_flat,
-    output wire        done
+    output wire         done
 );
 
     reg [3:0]  weights [0:3][0:3];
@@ -26,6 +17,7 @@ module systolic_array (
 
     assign done = done_reg;
 
+    // Pack accumulator output back to flat 1D wire array
     genvar gi, gj;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : row_out
@@ -35,49 +27,73 @@ module systolic_array (
         end
     endgenerate
 
-    // Weight loading
+    // Area Opt: Pre-calculate 4-bit * 8-bit products combinationally to strictly force 
+    // lightweight 4x8 Multipliers across the synthesizer rather than bulky 16x8 or 16x16.
+    wire [11:0] prod [0:3][0:3];
+    genvar gr, gc;
+    generate
+        for (gr = 0; gr < 4; gr = gr + 1) begin : row_prod
+            for (gc = 0; gc < 4; gc = gc + 1) begin : col_prod
+                assign prod[gr][gc] = weights[gr][gc] * activations_flat[gr*8 +: 8];
+            end
+        end
+    endgenerate
+
+    // Load Weights synchronously
     integer li, lj;
     always @(posedge clk) begin
-        if (load_weights)
-            for (li = 0; li < 4; li = li + 1)
-                for (lj = 0; lj < 4; lj = lj + 1)
+        if (load_weights) begin
+            for (li = 0; li < 4; li = li + 1) begin
+                for (lj = 0; lj < 4; lj = lj + 1) begin
                     weights[li][lj] <= weights_flat[(li*4+lj)*4 +: 4];
+                end
+            end
+        end
     end
 
-    // Main compute block
-    // Row i accumulates during cycles [i .. i+3] (4 times), gated by cyc.
-    // Total active cycles: 0..6 (7 cycles), done_reg <= 1 at cyc==6.
+    // Use a unified internal cycle to allow doing "Cycle 0" logic during `start` high pulse
+    wire [2:0] next_cyc = start ? 3'd0 : cyc;
+    
     integer ci, cj;
     always @(posedge clk) begin
         if (rst) begin
             running  <= 0;
             done_reg <= 0;
             cyc      <= 0;
-            for (ci = 0; ci < 4; ci = ci + 1)
-                for (cj = 0; cj < 4; cj = cj + 1)
-                    acc[ci][cj] <= 0;
-        end else if (start) begin
-            running  <= 1;
-            done_reg <= 0;
-            cyc      <= 0;
-            for (ci = 0; ci < 4; ci = ci + 1)
-                for (cj = 0; cj < 4; cj = cj + 1)
-                    acc[ci][cj] <= 0;
-        end else if (running) begin
-            // Each row i fires when cyc >= i and cyc < i+4
             for (ci = 0; ci < 4; ci = ci + 1) begin
-                if (cyc >= ci && cyc < ci + 4) begin
-                    for (cj = 0; cj < 4; cj = cj + 1)
-                        acc[ci][cj] <= acc[ci][cj]
-                            + {{12{1'b0}}, weights[ci][cj]}
-                              * activations_flat[ci*8 +: 8];
+                for (cj = 0; cj < 4; cj = cj + 1) begin
+                    acc[ci][cj] <= 0;
                 end
             end
-            cyc <= cyc + 1;
-            if (cyc == 3'd6) begin
-                done_reg <= 1;
-                running  <= 0;
+            
+        end else if (start || running) begin
+            // Evaluate current row bounds (starts on `start` = 0)
+            for (ci = 0; ci < 4; ci = ci + 1) begin
+                if (next_cyc >= ci && next_cyc < ci + 4) begin
+                    for (cj = 0; cj < 4; cj = cj + 1) begin
+                        // If `start` is high, replace previous acc with 0 during the accumulation
+                        acc[ci][cj] <= (start ? 16'd0 : acc[ci][cj]) + prod[ci][cj];
+                    end
+                end else if (start) begin
+                    for (cj = 0; cj < 4; cj = cj + 1) begin
+                        acc[ci][cj] <= 0;
+                    end
+                end
             end
+            
+            if (start) begin
+                running  <= 1;
+                done_reg <= 0;
+                cyc      <= 1;
+            end else begin
+                cyc <= cyc + 1;
+                // Assert completion synchronously hitting the 7th cycle accurately
+                if (cyc == 3'd6) begin
+                    done_reg <= 1;
+                    running  <= 0;
+                end
+            end
+            
         end else begin
             done_reg <= 0;
         end
