@@ -1,3 +1,9 @@
+## [0.3.1] - 2026-04-05
+
+Documentation
+~~~~~~~~~~~~~
+
+- Updated README with enhanced documentation and added .env.example for environment setup guidance (readme-env-setup)
 ## [0.4.0] - 2026-04-05
 
 Features
