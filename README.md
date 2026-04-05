@@ -11,6 +11,8 @@ tags:
 
 # VeriRL
 
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/raw/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/Supreeth/verirl-env)
+
 An OpenEnv environment for training and evaluating language models on synthesizable Verilog RTL design. Agents implement hardware modules for AI-accelerator primitives and receive graded feedback from real EDA tools — not heuristics, not LLM judges.
 
 ## Overview
@@ -29,14 +31,35 @@ Each task includes a detailed Verilog interface specification and a testbench th
 
 The agent interacts with the environment through a five-action loop that mirrors how a hardware engineer would approach a design:
 
-```
-reset(task_id) → initial observation with full task spec
-  ↓
-write_file   — submit a Verilog module (verilog_src field)
-run_compile  — syntax and elaboration check via iverilog
-run_sim      — functional simulation against the task testbench
-run_synth    — synthesis via yosys (area/cell-count estimation)
-submit       — grade and end the episode
+```mermaid
+sequenceDiagram
+    participant LLM as Agent (LLM)
+    participant Env as VeriRL Environment
+    participant EDA as EDA Tools (iverilog/yosys)
+    
+    LLM->>Env: reset(task_id)
+    Env-->>LLM: task_spec (Markdown)
+    
+    loop Episodic Loop
+        alt Action: write_file
+            LLM->>Env: Verilog Code
+        else Action: run_compile
+            Env->>EDA: Syntax check
+            EDA-->>Env: Compilation Status / Errors
+        else Action: run_sim
+            Env->>EDA: Functional Simulation
+            EDA-->>Env: Tests Passed / Total
+        else Action: run_synth
+            Env->>EDA: Yosys Synthesis
+            EDA-->>Env: Area (Cell Count)
+        end
+        Env-->>LLM: VerirlObservation (tool_stdout, reward, etc.)
+    end
+    
+    LLM->>Env: submit (or turn budget exhausted)
+    Env->>EDA: Final complete evaluation
+    EDA-->>Env: Weighted Score [0, 1]
+    Env-->>LLM: Final Score & Episode Done
 ```
 
 The agent can iterate: fix compile errors, re-run simulation after test failures, check area, and submit when satisfied. Each task has a turn budget (8 / 10 / 12 turns for easy / medium / hard). Episodes also end automatically when the turn budget is exhausted, with a final grade computed on whatever code is on file.
@@ -51,7 +74,7 @@ The server supports up to 10 concurrent WebSocket sessions, each with fully isol
 |---|---|---|---|
 | `action_type` | `str` | yes | One of: `write_file`, `run_compile`, `run_sim`, `run_synth`, `submit` |
 | `verilog_src` | `str \| None` | for `write_file` | Complete Verilog source code to submit |
-| `message` | `str \| None` | no | Agent reasoning note — logged but not graded |
+| `message` | `str \| None` | no | Agent reasoning note — logged but not graded. This allows Chain-of-Thought (CoT) reasoning to be recorded in the episode trajectory without cluttering the Verilog source code, which is highly beneficial for post-episode analysis or fine-tuning datasets. |
 
 Only one action is executed per step. Actions that have prerequisites (e.g., `run_sim` before `write_file`) return an error in `tool_stderr` without consuming compilation state.
 
@@ -77,7 +100,7 @@ Only one action is executed per step. Actions that have prerequisites (e.g., `ru
 
 ## Tasks
 
-### Task 1: Pipelined MAC Unit — Easy
+### Task 1: Pipelined MAC Unit — Easy ([View Spec](problems/task1_mac/spec.md))
 
 **Turn budget:** 8 | **Module:** `mac_unit`
 
@@ -89,7 +112,7 @@ A 2-stage pipelined multiply-accumulate unit for signed 8-bit integers with a 32
 
 ---
 
-### Task 2: AXI-Stream FIFO — Medium
+### Task 2: AXI-Stream FIFO — Medium ([View Spec](problems/task2_axi_fifo/spec.md))
 
 **Turn budget:** 10 | **Module:** `axi_fifo #(.DATA_W=8)`
 
@@ -101,7 +124,7 @@ A 4-entry synchronous FIFO implementing the AXI4-Stream handshake on both slave 
 
 ---
 
-### Task 3: 4×4 Weight-Stationary Systolic Array — Hard
+### Task 3: 4×4 Weight-Stationary Systolic Array — Hard ([View Spec](problems/task3_systolic/spec.md))
 
 **Turn budget:** 12 | **Module:** `systolic_array`
 
@@ -150,6 +173,19 @@ The final score (on `submit` or episode expiry) is the weighted EDA-tool score i
 ```bash
 uv sync
 ```
+
+### Configuration / Environment Variables
+
+The inference script and environment support the following configuration variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | None | API key for standard OpenAI / Hugging Face Router models. |
+| `HF_TOKEN` | None | Alternative for Hugging Face inference tokens. |
+| `API_BASE_URL` | `https://router.huggingface.co/v1` | URL for the LLM Inference API. |
+| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | The specific model to query. |
+| `ENV_BASE_URL` | `http://localhost:8000` | Where the VeriRL server is running. |
+| `VERIRL_PROBLEMS_DIR` | `<auto-detected>` | Overrides the path to the `/problems` directory. |
 
 ### Run the server
 
@@ -270,3 +306,10 @@ pytest
 # with coverage
 pytest --cov
 ```
+
+## Troubleshooting & FAQ
+
+*   **Synthesis fails with "timeout" error:**
+    If the agent generates extremely deep combinatorial loops or massive unrolled blocks, Yosys synthesis can hang. The environment deliberately caps execution (`SYNTH_TIMEOUT=60`) and fails the step gracefully.
+*   **"iverilog not found" on Windows:**
+    The easiest way to run the environment natively on Windows is through WSL2 or via Docker (see the Docker section above).
