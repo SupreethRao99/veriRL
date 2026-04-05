@@ -313,17 +313,3 @@ pytest --cov
     If the agent generates extremely deep combinatorial loops or massive unrolled blocks, Yosys synthesis can hang. The environment deliberately caps execution (`SYNTH_TIMEOUT=60`) and fails the step gracefully.
 *   **"iverilog not found" on Windows:**
     The easiest way to run the environment natively on Windows is through WSL2 or via Docker (see the Docker section above).
-
-## Citation & License
-
-VeriRL is licensed under the [BSD License](LICENSE).
-
-If you use VeriRL in your research, please cite:
-```bibtex
-@software{verirl2026,
-  title = {VeriRL: OpenEnv Verilog Hardware Design Environment},
-  author = {Your Name / Organization},
-  year = {2026},
-  url = {https://github.com/your-org/verirl_env}
-}
-```
