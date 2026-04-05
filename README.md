@@ -123,7 +123,7 @@ reward = +0.02  (any Verilog is on file)
        + 0.10 × (tests_passed / tests_total)        (absolute test ratio)
        + 0.15 × (Δ test ratio vs previous sim run)  (improvement bonus)
        - min(0.01 × turn_number, 0.05)              (time penalty, capped at 0.05)
-       clamped to [-0.05, ...]
+       clamped to [0.0, 1.0]
 ```
 
 The improvement bonus rewards each incremental fix: fixing 5 failing tests in one step earns more than fixing 1. `write_file` resets the compile and simulation state so that all progress signals are tied to the current code on file.
