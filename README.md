@@ -120,10 +120,13 @@ The environment provides a dense per-step reward signal to guide the agent's too
 ```
 reward = +0.02  (any Verilog is on file)
        + 0.05  (current code compiles)
-       + 0.10 × (tests_passed / tests_total)  (if simulation has been run)
-       - 0.01 × turn_number  (time penalty for inefficiency)
-       clamped to [-0.05, ...]
+       + 0.10 × (tests_passed / tests_total)        (absolute test ratio)
+       + 0.15 × (Δ test ratio vs previous sim run)  (improvement bonus)
+       - min(0.01 × turn_number, 0.05)              (time penalty, capped at 0.05)
+       clamped to [0.0, 1.0]
 ```
+
+The improvement bonus rewards each incremental fix: fixing 5 failing tests in one step earns more than fixing 1. `write_file` resets the compile and simulation state so that all progress signals are tied to the current code on file.
 
 The final score (on `submit` or episode expiry) is the weighted EDA-tool score in [0, 1] as described per task above. This is distinct from the cumulative per-step reward and is what is reported as the task score.
 
@@ -164,7 +167,9 @@ The inference script connects to a running server and runs the baseline agent ag
 
 ```bash
 # Set required environment variables
-export HF_TOKEN=<your_token>
+# API key — uses first available of:
+export OPENAI_API_KEY=<your_key>   # OpenAI or compatible provider
+# export HF_TOKEN=<your_token>     # Hugging Face inference router
 export API_BASE_URL=https://router.huggingface.co/v1   # default
 export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct            # default
 export ENV_BASE_URL=http://localhost:8000              # default

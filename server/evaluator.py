@@ -110,7 +110,7 @@ TASK_WEIGHTS: Dict[str, Dict[str, float]] = {
     },
 }
 
-SYSTOLIC_TIMING_LIMIT = 7  # cycles
+SYSTOLIC_TIMING_LIMIT = 10  # cycles — allows 7 + 3-cycle graceful degradation
 
 
 class VerilogEvaluator:
@@ -310,22 +310,26 @@ class VerilogEvaluator:
         if sim.tests_total > 0:
             breakdown["sim"] = sim.tests_passed / sim.tests_total
 
-        # Step 3: Synthesis (run once if needed for timing or area)
-        needs_synth = (
-            "area" in breakdown and breakdown["sim"] >= 0.4
-        ) or (
-            task_id == "mac_unit"
-            and "timing" in breakdown
-            and breakdown["sim"] >= 0.5
-        )
-        synth = self.synthesize(verilog_src) if needs_synth else None
+        # Step 3: Synthesis — always run if code compiles; area/timing use results below
+        synth = self.synthesize(verilog_src)
 
         # Step 4: Timing scoring (task-specific)
         if "timing" in breakdown:
             if task_id == "mac_unit" and synth is not None:
-                # Verify 2-stage pipeline via DFF count
+                # Verify 2-stage pipeline via DFF count.
+                # After yosys tech mapping, DFFs appear as $_SDFF_* or $_SDFFE_* cells.
+                # Count both pre-mapped ($dff) and post-mapped ($_SDFF, $_SDFFE) variants.
+                dff_count = 0
+                # Pre-mapped: $dff cells (appear in verbose log)
                 dff_match = re.search(r"\$dff\s+(\d+)", synth.stdout)
-                if dff_match and int(dff_match.group(1)) >= 2:
+                if dff_match:
+                    dff_count = int(dff_match.group(1))
+                # Post-mapped: count $_SDFF cells in stat output
+                sdff_match = re.findall(r"\$_SDFF", synth.stdout)
+                if sdff_match:
+                    dff_count = len(sdff_match)
+
+                if dff_count >= 2:
                     breakdown["timing"] = 1.0
                 elif synth.cell_count >= 10:
                     breakdown["timing"] = 0.5
@@ -341,13 +345,15 @@ class VerilogEvaluator:
                 elif breakdown["sim"] > 0:
                     breakdown["timing"] = 0.2
 
-        # Step 5: Area scoring
+        # Step 5: Area scoring — gated on functional correctness (sim > 0)
+        # Prevents a trivially small but wrong module from scoring high on area.
         if (
             "area" in breakdown
             and synth is not None
             and synth.success
             and synth.cell_count > 0
             and reference_cells > 0
+            and breakdown["sim"] > 0.0
         ):
             breakdown["area"] = min(reference_cells / synth.cell_count, 1.0)
 

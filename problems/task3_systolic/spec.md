@@ -24,36 +24,39 @@ module systolic_array (
 ### Architecture
 - 4×4 grid of Processing Elements (PEs)
 - Each PE holds one preloaded 4-bit weight
-- Activations flow left-to-right across rows with correct diagonal skewing
-- PE[i][j] receives activation[i] at cycle i+j (0-indexed from start pulse)
-- Each PE accumulates: acc += weight × activation each cycle it receives valid data
-- After 4 accumulations, PE[i][j] output is valid
+- Activations are skewed by row: row i begins accumulating i cycles after start
+- PE[i][j] accumulates `weight[i][j] × activation[i]` for exactly **4 consecutive cycles**
+- After 4 accumulations, `output[i][j] = 4 × weight[i][j] × activation[i]`
 
 ### Timing Requirement — Critical
-- `done` must assert within **7 clock cycles** of the `start` pulse
-- This requires correct diagonal skewing of input activations
-- The wavefront propagates diagonally: PE[0][0] fires at cycle 0, PE[1][1] at cycle 1, PE[3][3] at cycle 6
+- Optimal: `done` asserts within **7 clock cycles** of the `start` pulse
+- Acceptable: up to 10 cycles (receives partial credit via scaling formula)
+- Architecture: Row 0 accumulates cycles 0–3, row 1 cycles 1–4, row 2 cycles 2–5, row 3 cycles 3–6
+- Row 3 finishes last (cycle 6); optimal `done` at posedge 7; maximum acceptable at posedge 10
 
 ### Processing Element
-Each PE computes:
+Each PE in row i, column j computes:
 ```
-acc += weight[i][j] * activation_in
-activation_out = activation_in  // pass through to next column
+if (cycle >= i && cycle < i+4):
+    acc[i][j] += weight[i][j] * activations[i]
 ```
 
 ### Data Layout
-- `weights_flat[4*i+j * 4 +: 4]` = weight for PE at row i, column j
-- `activations_flat[i*8 +: 8]` = activation for row i
-- `outputs_flat[(i*4+j)*16 +: 16]` = result C[i][j]
+- `weights_flat[(i*4+j)*4 +: 4]` = weight for PE at row i, column j
+- `activations_flat[i*8 +: 8]` = activation for row i (held stable during computation)
+- `outputs_flat[(i*4+j)*16 +: 16]` = result `output[i][j]`
 
 ## Scoring
 - Compilation: 5%
-- Functional correctness (all 16 outputs match numpy reference): 50%
-- Timing (done asserts within 7 cycles): 30%
+- Functional correctness (all outputs match reference): 50%
+- Timing: 30%
+  - cycles ≤ 7: score = 1.0
+  - 7 < cycles ≤ 10: score = 1.0 - (cycles - 7) × 0.2 (graceful degradation)
+  - cycles > 10: score = 0.2 (partial credit for functional designs)
 - Area efficiency: 15%
 
 ## Hints
-- Implement skew delay lines using shift registers on each activation input
-- Row i needs a shift register of depth i before the first PE
-- The total latency is: skew_depth + 4 accumulation cycles = i + 4 cycles for row i
-- done asserts when the last PE (PE[3][3]) has finished: at cycle 3 (skew) + 3 (propagation) = 6 cycles after start, so done at cycle 7
+- Use a 3-bit cycle counter `cyc` (0–6) to gate each row's accumulation window
+- Row i accumulates when `cyc >= i && cyc < i+4`
+- Set `done_reg <= 1` when `cyc == 6` (row 3 completes its 4th accumulation)
+- No shift-register delay lines needed — just gated enables per row

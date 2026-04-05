@@ -43,6 +43,7 @@ STDOUT FORMAT
 import asyncio
 import json
 import os
+import sys
 import textwrap
 import time
 from typing import List, Optional
@@ -56,7 +57,7 @@ load_dotenv()
 
 
 # --- Configuration ---
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
@@ -275,6 +276,11 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
 
             # Validate reward is in expected range
             if not (-1.0 <= reward <= 1.0):
+                print(
+                    f"[WARNING] Task {task_id}: reward {reward} outside [-1.0, 1.0]",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 error = sanitize_error(f"reward {reward} outside [-1.0, 1.0]")
 
             rewards.append(reward)
@@ -294,6 +300,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
         if not (0.0 <= final_score <= 1.0):
             print(
                 f"[WARNING] Task {task_id}: final_score {final_score} not in [0, 1]",
+                file=sys.stderr,
                 flush=True,
             )
 

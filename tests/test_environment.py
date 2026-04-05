@@ -92,6 +92,35 @@ class TestEnvironmentStep:
         assert obs.tests_total > 0
         assert obs.tests_passed > 0
 
+    def test_write_file_resets_compile_ok(self, environment, mac_reference_verilog, requires_iverilog):
+        """Rewriting code must clear compile_ok so stale state is never observed."""
+        environment.reset(task_id="mac_unit")
+        # Write good code and compile — compile_ok becomes True
+        environment.step(VerirlAction(action_type="write_file", verilog_src=mac_reference_verilog))
+        obs = environment.step(VerirlAction(action_type="run_compile"))
+        assert obs.compile_ok is True
+        # Overwrite with a different module — compile_ok must reset immediately
+        obs = environment.step(VerirlAction(
+            action_type="write_file",
+            verilog_src="module mac_unit (input clk); endmodule"
+        ))
+        assert obs.compile_ok is False
+
+    def test_write_file_resets_sim_state(self, environment, mac_reference_verilog, requires_eda_tools):
+        """Rewriting code must clear tests_passed/tests_total from any previous sim."""
+        environment.reset(task_id="mac_unit")
+        environment.step(VerirlAction(action_type="write_file", verilog_src=mac_reference_verilog))
+        environment.step(VerirlAction(action_type="run_compile"))
+        obs = environment.step(VerirlAction(action_type="run_sim"))
+        assert obs.tests_passed > 0
+        # Overwrite — sim state must be cleared
+        obs = environment.step(VerirlAction(
+            action_type="write_file",
+            verilog_src="module mac_unit (input clk); endmodule"
+        ))
+        assert obs.tests_passed == 0
+        assert obs.tests_total == 0
+
 
 class TestEnvironmentReward:
     """Test reward calculation."""
