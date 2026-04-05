@@ -110,7 +110,7 @@ TASK_WEIGHTS: Dict[str, Dict[str, float]] = {
     },
 }
 
-SYSTOLIC_TIMING_LIMIT = 7  # cycles
+SYSTOLIC_TIMING_LIMIT = 10  # cycles — allows 7 + 3-cycle graceful degradation
 
 
 class VerilogEvaluator:
@@ -316,9 +316,20 @@ class VerilogEvaluator:
         # Step 4: Timing scoring (task-specific)
         if "timing" in breakdown:
             if task_id == "mac_unit" and synth is not None:
-                # Verify 2-stage pipeline via DFF count
+                # Verify 2-stage pipeline via DFF count.
+                # After yosys tech mapping, DFFs appear as $_SDFF_* or $_SDFFE_* cells.
+                # Count both pre-mapped ($dff) and post-mapped ($_SDFF, $_SDFFE) variants.
+                dff_count = 0
+                # Pre-mapped: $dff cells (appear in verbose log)
                 dff_match = re.search(r"\$dff\s+(\d+)", synth.stdout)
-                if dff_match and int(dff_match.group(1)) >= 2:
+                if dff_match:
+                    dff_count = int(dff_match.group(1))
+                # Post-mapped: count $_SDFF cells in stat output
+                sdff_match = re.findall(r"\$_SDFF", synth.stdout)
+                if sdff_match:
+                    dff_count = len(sdff_match)
+
+                if dff_count >= 2:
                     breakdown["timing"] = 1.0
                 elif synth.cell_count >= 10:
                     breakdown["timing"] = 0.5

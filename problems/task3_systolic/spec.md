@@ -29,9 +29,10 @@ module systolic_array (
 - After 4 accumulations, `output[i][j] = 4 × weight[i][j] × activation[i]`
 
 ### Timing Requirement — Critical
-- `done` must assert within **7 clock cycles** of the `start` pulse
-- Row 0 accumulates cycles 0–3, row 1 cycles 1–4, row 2 cycles 2–5, row 3 cycles 3–6
-- Row 3 finishes last (cycle 6); `done` asserts at posedge 7
+- Optimal: `done` asserts within **7 clock cycles** of the `start` pulse
+- Acceptable: up to 10 cycles (receives partial credit via scaling formula)
+- Architecture: Row 0 accumulates cycles 0–3, row 1 cycles 1–4, row 2 cycles 2–5, row 3 cycles 3–6
+- Row 3 finishes last (cycle 6); optimal `done` at posedge 7; maximum acceptable at posedge 10
 
 ### Processing Element
 Each PE in row i, column j computes:
@@ -48,7 +49,10 @@ if (cycle >= i && cycle < i+4):
 ## Scoring
 - Compilation: 5%
 - Functional correctness (all outputs match reference): 50%
-- Timing (done asserts within 7 cycles): 30%
+- Timing: 30%
+  - cycles ≤ 7: score = 1.0
+  - 7 < cycles ≤ 10: score = 1.0 - (cycles - 7) × 0.2 (graceful degradation)
+  - cycles > 10: score = 0.2 (partial credit for functional designs)
 - Area efficiency: 15%
 
 ## Hints
