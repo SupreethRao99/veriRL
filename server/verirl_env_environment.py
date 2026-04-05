@@ -149,6 +149,7 @@ class VerirlEnvironment(Environment):
         self._compile_ok: bool = False
         self._tests_passed: int = 0
         self._tests_total: int = 0
+        self._prev_sim_ratio: float = 0.0
         self._total_reward: float = 0.0
         self._turn_number: int = 0
         self._max_turns: int = 10
@@ -217,6 +218,7 @@ class VerirlEnvironment(Environment):
         self._compile_ok = False
         self._tests_passed = 0
         self._tests_total = 0
+        self._prev_sim_ratio = 0.0
         self._total_reward = 0.0
         self._turn_number = 0
 
@@ -271,6 +273,11 @@ class VerirlEnvironment(Environment):
                 tool_stderr = "ERROR: write_file requires the verilog_src field."
             else:
                 self._current_verilog = action.verilog_src
+                # Reset compilation and simulation state — new code must be re-verified
+                self._compile_ok = False
+                self._tests_passed = 0
+                self._tests_total = 0
+                self._prev_sim_ratio = 0.0
                 tool_stdout = "File written. Use run_compile to check syntax."
 
         elif action.action_type == "run_compile":
@@ -309,7 +316,12 @@ class VerirlEnvironment(Environment):
                 )
             else:
                 result = self.evaluator.synthesize(self._current_verilog)
-                tool_stdout = f"Cell count: {result.cell_count}\n{result.stdout}"
+                ref = self._current_task.reference_cells
+                tool_stdout = (
+                    f"Cell count: {result.cell_count} "
+                    f"(reference target: {ref} cells — smaller is better up to the reference)\n"
+                    + result.stdout
+                )
                 tool_stderr = result.stderr
 
         elif action.action_type == "submit":
@@ -399,6 +411,13 @@ class VerirlEnvironment(Environment):
 
         Rewards progress (having code, compiling, passing tests) and
         applies a small time penalty to encourage efficiency.
+
+        Components:
+        - +0.02 for having any Verilog on file
+        - +0.05 for a clean compile
+        - +0.10 × (tests_passed / tests_total) for absolute test ratio
+        - +0.15 × improvement in test ratio vs previous sim run (delta bonus)
+        - -min(0.01 × turn_number, 0.05) time penalty (capped at 0.05)
         """
         reward = 0.0
         if self._current_verilog:
@@ -406,8 +425,15 @@ class VerirlEnvironment(Environment):
         if self._compile_ok:
             reward += 0.05
         if self._tests_total > 0:
-            reward += 0.10 * (self._tests_passed / self._tests_total)
-        reward -= 0.01 * self._turn_number
+            current_ratio = self._tests_passed / self._tests_total
+            reward += 0.10 * current_ratio
+            # Delta bonus: reward improvement over the last sim run
+            delta = current_ratio - self._prev_sim_ratio
+            if delta > 0:
+                reward += 0.15 * delta
+            self._prev_sim_ratio = current_ratio
+        # Time penalty capped at 0.05 so later turns aren't over-penalised
+        reward -= min(0.01 * self._turn_number, 0.05)
         return max(reward, -0.05)
 
     def _sync_state(self, final_score: Optional[float]) -> None:

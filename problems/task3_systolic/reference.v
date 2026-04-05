@@ -1,3 +1,12 @@
+// Reference implementation: weight-stationary 4x4 systolic array
+//
+// Architecture:
+//   - Row i's activation is delayed by i cycles (diagonal skewing via row-gated enable)
+//   - PE[i][j] accumulates exactly 4 times: at cycles i, i+1, i+2, i+3
+//   - Row 3 finishes last (cycles 3..6), so done_reg fires at cyc==6
+//   - done wire is high for one cycle at posedge 7 from start
+//   - output[i][j] = 4 * activations[i] * weights[i][j]
+
 module systolic_array (
     input  wire        clk,
     input  wire        rst,
@@ -9,16 +18,9 @@ module systolic_array (
     output wire        done
 );
 
-    // PE weight storage
-    reg [3:0] weights [0:3][0:3];
-
-    // Internal PE connections
-    // act_in[i][j]: activation entering PE[i][j]
-    reg [7:0] act_pipe [0:3][0:4];  // one extra for output (unused)
-
-    // Accumulators
-    reg [15:0] acc [0:3][0:3];
-    reg [2:0]  cyc_count;     // counts 0..7 from start
+    reg [3:0]  weights [0:3][0:3];
+    reg [15:0] acc     [0:3][0:3];
+    reg [2:0]  cyc;
     reg        running;
     reg        done_reg;
 
@@ -36,61 +38,43 @@ module systolic_array (
     // Weight loading
     integer li, lj;
     always @(posedge clk) begin
-        if (load_weights) begin
+        if (load_weights)
             for (li = 0; li < 4; li = li + 1)
                 for (lj = 0; lj < 4; lj = lj + 1)
                     weights[li][lj] <= weights_flat[(li*4+lj)*4 +: 4];
-        end
     end
 
-    // Activation skew delay lines: row i gets i-cycle delay
-    // act_pipe[i][0] = raw activation for row i
-    // act_pipe[i][k] = activation delayed by k cycles
-    integer si;
-    always @(posedge clk) begin
-        for (si = 0; si < 4; si = si + 1) begin
-            if (rst) begin
-                act_pipe[si][0] <= 0;
-                act_pipe[si][1] <= 0;
-                act_pipe[si][2] <= 0;
-                act_pipe[si][3] <= 0;
-            end else if (running) begin
-                act_pipe[si][0] <= activations_flat[si*8 +: 8];
-                act_pipe[si][1] <= act_pipe[si][0];
-                act_pipe[si][2] <= act_pipe[si][1];
-                act_pipe[si][3] <= act_pipe[si][2];
-            end
-        end
-    end
-
-    // Compute: each PE[i][j] uses act_pipe[i][j] as its skewed input
+    // Main compute block
+    // Row i accumulates during cycles [i .. i+3] (4 times), gated by cyc.
+    // Total active cycles: 0..6 (7 cycles), done_reg <= 1 at cyc==6.
     integer ci, cj;
     always @(posedge clk) begin
         if (rst) begin
-            running   <= 0;
-            done_reg  <= 0;
-            cyc_count <= 0;
+            running  <= 0;
+            done_reg <= 0;
+            cyc      <= 0;
             for (ci = 0; ci < 4; ci = ci + 1)
                 for (cj = 0; cj < 4; cj = cj + 1)
                     acc[ci][cj] <= 0;
         end else if (start) begin
-            running   <= 1;
-            done_reg  <= 0;
-            cyc_count <= 0;
+            running  <= 1;
+            done_reg <= 0;
+            cyc      <= 0;
             for (ci = 0; ci < 4; ci = ci + 1)
                 for (cj = 0; cj < 4; cj = cj + 1)
                     acc[ci][cj] <= 0;
         end else if (running) begin
-            cyc_count <= cyc_count + 1;
+            // Each row i fires when cyc >= i and cyc < i+4
             for (ci = 0; ci < 4; ci = ci + 1) begin
-                for (cj = 0; cj < 4; cj = cj + 1) begin
-                    // PE[i][j] fires when its skewed activation arrives
-                    // act_pipe[i][j] has j-cycle delay, PE in column j
-                    // Valid from cycle ci onward for row ci
-                    acc[ci][cj] <= acc[ci][cj] + weights[ci][cj] * act_pipe[ci][cj];
+                if (cyc >= ci && cyc < ci + 4) begin
+                    for (cj = 0; cj < 4; cj = cj + 1)
+                        acc[ci][cj] <= acc[ci][cj]
+                            + {{12{1'b0}}, weights[ci][cj]}
+                              * activations_flat[ci*8 +: 8];
                 end
             end
-            if (cyc_count == 3'd6) begin
+            cyc <= cyc + 1;
+            if (cyc == 3'd6) begin
                 done_reg <= 1;
                 running  <= 0;
             end

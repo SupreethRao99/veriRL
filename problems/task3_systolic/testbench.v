@@ -67,11 +67,14 @@ module tb_systolic;
 
         start = 1; @(posedge clk); start = 0;
 
-        repeat(10) begin
-            @(posedge clk);
-            if (done) disable wait_loop1;
+        begin: wait_loop1
+            repeat(10) begin
+                @(posedge clk);
+                if (done) disable wait_loop1;
+            end
         end
-        wait_loop1: ;
+        // Wait one more cycle so the done_cycle non-blocking capture settles
+        @(posedge clk);
 
         if (done_cycle <= 7) begin
             $display("PASS: timing — done at cycle %0d (<=7)", done_cycle);

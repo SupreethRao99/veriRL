@@ -110,14 +110,81 @@ class TestSystolicArray:
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
         )
-        assert result.final_score > 0.0  # Should have some score
+        assert result.final_score > 0.0
         assert result.compilation.success is True
+        assert result.simulation is not None
+        assert result.simulation.tests_total > 0
+        # Reference should pass some tests
+        assert result.simulation.tests_passed > 0
+
+    def test_systolic_reference_timing(self, evaluator, systolic_reference_verilog, environment, requires_eda_tools):
+        """Timing dimension is captured and scored within [0, 1]."""
+        task = environment.tasks["systolic_array"]
+        result = evaluator.grade(
+            verilog_src=systolic_reference_verilog,
+            task_id="systolic_array",
+            testbench_path=task.testbench_path,
+            reference_cells=task.reference_cells,
+        )
+        # Score breakdown always present and timing score is in valid range
+        assert result.score_breakdown is not None
+        timing_score = result.score_breakdown.get("timing", -1.0)
+        assert 0.0 <= timing_score <= 1.0
+
+    def test_systolic_empty_submission(self, evaluator, environment):
+        """Empty submission must score 0.0."""
+        task = environment.tasks["systolic_array"]
+        result = evaluator.grade(
+            verilog_src="",
+            task_id="systolic_array",
+            testbench_path=task.testbench_path,
+            reference_cells=task.reference_cells,
+        )
+        assert result.final_score == 0.0
+        assert result.compilation.success is False
+
+    def test_systolic_broken_module(self, evaluator, environment, requires_iverilog):
+        """A module that compiles but has wrong interface should score only compile credit."""
+        broken = "module systolic_array (input clk); endmodule"
+        task = environment.tasks["systolic_array"]
+        result = evaluator.grade(
+            verilog_src=broken,
+            task_id="systolic_array",
+            testbench_path=task.testbench_path,
+            reference_cells=task.reference_cells,
+        )
+        assert result.compilation.success is True
+        # Sim should fail (wrong interface) — only compile credit (5%)
+        assert result.final_score <= 0.05 + 1e-6
         if result.simulation:
-            # Systolic may or may not pass all tests depending on impl
-            assert result.simulation.tests_total >= 0
-        # Check timing if available
-        if result.simulation and result.simulation.timing_cycles:
-            assert result.simulation.timing_cycles <= 20  # Reasonable bound
+            assert result.simulation.tests_passed == 0
+
+    def test_systolic_area_gated_on_sim(self, evaluator, environment, requires_eda_tools):
+        """Area score must be 0 when no tests pass, even for a compact module."""
+        broken = "module systolic_array (input clk); endmodule"
+        task = environment.tasks["systolic_array"]
+        result = evaluator.grade(
+            verilog_src=broken,
+            task_id="systolic_array",
+            testbench_path=task.testbench_path,
+            reference_cells=task.reference_cells,
+        )
+        if result.score_breakdown:
+            assert result.score_breakdown.get("area", 0.0) == 0.0
+
+    def test_systolic_score_breakdown_keys(self, evaluator, environment, requires_eda_tools):
+        """Score breakdown must contain compile, sim, timing, area keys for systolic_array."""
+        task = environment.tasks["systolic_array"]
+        result = evaluator.grade(
+            verilog_src="module systolic_array (input clk); endmodule",
+            task_id="systolic_array",
+            testbench_path=task.testbench_path,
+            reference_cells=task.reference_cells,
+        )
+        assert result.score_breakdown is not None
+        assert set(result.score_breakdown.keys()) == {"compile", "sim", "timing", "area"}
+        for v in result.score_breakdown.values():
+            assert 0.0 <= v <= 1.0
 
 
 class TestSynthesis:

@@ -310,15 +310,8 @@ class VerilogEvaluator:
         if sim.tests_total > 0:
             breakdown["sim"] = sim.tests_passed / sim.tests_total
 
-        # Step 3: Synthesis (run once if needed for timing or area)
-        needs_synth = (
-            "area" in breakdown and breakdown["sim"] >= 0.4
-        ) or (
-            task_id == "mac_unit"
-            and "timing" in breakdown
-            and breakdown["sim"] >= 0.5
-        )
-        synth = self.synthesize(verilog_src) if needs_synth else None
+        # Step 3: Synthesis — always run if code compiles; area/timing use results below
+        synth = self.synthesize(verilog_src)
 
         # Step 4: Timing scoring (task-specific)
         if "timing" in breakdown:
@@ -341,13 +334,15 @@ class VerilogEvaluator:
                 elif breakdown["sim"] > 0:
                     breakdown["timing"] = 0.2
 
-        # Step 5: Area scoring
+        # Step 5: Area scoring — gated on functional correctness (sim > 0)
+        # Prevents a trivially small but wrong module from scoring high on area.
         if (
             "area" in breakdown
             and synth is not None
             and synth.success
             and synth.cell_count > 0
             and reference_cells > 0
+            and breakdown["sim"] > 0.0
         ):
             breakdown["area"] = min(reference_cells / synth.cell_count, 1.0)
 
