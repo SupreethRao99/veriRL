@@ -1,3 +1,9 @@
+## [0.3.5] - 2026-04-07
+
+Bug Fixes
+~~~~~~~~~
+
+- Add safe_score guard in inference.py to clamp rewards to [0.01, 0.99] (inference-safe-score)
 ## [0.3.4] - 2026-04-07
 
 Bug Fixes
