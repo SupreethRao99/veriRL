@@ -1,3 +1,14 @@
+## [0.3.2] - 2026-04-07
+
+Bug Fixes
+~~~~~~~~~
+
+- Fixed task final scores to fall strictly within (0, 1) as required by the Phase 2 validator (fix-score-range)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+-  (sync-version)
 ## [0.3.1] - 2026-04-05
 
 Documentation
