@@ -159,16 +159,34 @@ jobs:
           NEXT_VERSION=$(python scripts/bump_version.py)
           echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Check if release already exists
+        id: check_tag
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "Tag v${{ steps.version.outputs.version }} already exists — skipping release"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure git
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
+      - name: Bump version in pyproject.toml
+        if: steps.check_tag.outputs.skip != 'true'
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
+
       - name: Generate changelog
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           towncrier build --version ${{ steps.version.outputs.version }} --yes
 
       - name: Commit and push changelog
+        if: steps.check_tag.outputs.skip != 'true'
         run: |
           git add CHANGELOG.md pyproject.toml .changelog.d/
           git commit -m "Release v${{ steps.version.outputs.version }}"
@@ -177,9 +195,11 @@ jobs:
           git push origin v${{ steps.version.outputs.version }}
 
       - name: Set up Docker Buildx
+        if: steps.check_tag.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v2
 
       - name: Log in to Container Registry
+        if: steps.check_tag.outputs.skip != 'true'
         uses: docker/login-action@v2
         with:
           registry: ${{ env.REGISTRY }}
@@ -187,6 +207,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push versioned Docker image
+        if: steps.check_tag.outputs.skip != 'true'
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -203,6 +224,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Create GitHub release
+        if: steps.check_tag.outputs.skip != 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.version }}
@@ -213,7 +235,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Post release info
-        if: success()
+        if: success() && steps.check_tag.outputs.skip != 'true'
         run: |
           echo "✓ Release v${{ steps.version.outputs.version }} published!"
           echo ""
