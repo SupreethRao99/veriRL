@@ -357,7 +357,9 @@ class VerilogEvaluator:
         ):
             breakdown["area"] = min(reference_cells / synth.cell_count, 1.0)
 
-        final_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
+        raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
+        # Validator requires scores strictly in (0, 1) — clamp away from boundaries
+        final_score = max(1e-4, min(1 - 1e-4, raw_score))
 
         return EvalResult(
             compilation=comp,
