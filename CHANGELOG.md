@@ -1,3 +1,9 @@
+## [0.3.3] - 2026-04-07
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+-  (fix-release-workflow, sync-version-032)
 ## [0.3.2] - 2026-04-07
 
 Bug Fixes
