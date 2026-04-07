@@ -434,8 +434,8 @@ class VerirlEnvironment(Environment):
             self._prev_sim_ratio = current_ratio
         # Time penalty capped at 0.05 so later turns aren't over-penalised
         reward -= min(0.01 * self._turn_number, 0.05)
-        # Clamp to [0.0, 1.0] per rubric requirement
-        return max(reward, 0.0)
+        # Clamp to (0, 1) exclusive per validator requirement
+        return max(0.01, min(0.99, reward))
 
     def _sync_state(self, final_score: Optional[float]) -> None:
         """Update the public state object from internal episode variables."""

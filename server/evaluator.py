@@ -291,7 +291,7 @@ class VerilogEvaluator:
                 compilation=CompilationResult(
                     success=False, stdout="", stderr="Empty submission"
                 ),
-                final_score=0.0,
+                final_score=0.01,
                 score_breakdown=breakdown,
             )
 
@@ -300,7 +300,7 @@ class VerilogEvaluator:
         if not comp.success:
             return EvalResult(
                 compilation=comp,
-                final_score=0.0,
+                final_score=0.01,
                 score_breakdown=breakdown,
             )
         breakdown["compile"] = 1.0
@@ -358,8 +358,8 @@ class VerilogEvaluator:
             breakdown["area"] = min(reference_cells / synth.cell_count, 1.0)
 
         raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
-        # Validator requires scores strictly in (0, 1) — clamp away from boundaries
-        final_score = max(1e-4, min(1 - 1e-4, raw_score))
+        # Validator requires scores strictly in (0, 1) — clamp to [0.01, 0.99]
+        final_score = max(0.01, min(0.99, raw_score))
 
         return EvalResult(
             compilation=comp,
