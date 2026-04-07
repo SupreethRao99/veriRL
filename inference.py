@@ -131,6 +131,11 @@ def log_end(success: bool, steps: int, rewards: List[float]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def safe_score(raw) -> float:
+    """Clamp any score/reward to the open interval (0, 1) required by the validator."""
+    return round(min(max(float(raw), 0.01), 0.99), 2)
+
+
 def sanitize_error(error_str: str, max_len: int = 80) -> Optional[str]:
     """Sanitize error message: remove newlines, truncate to max_len."""
     if not error_str:
@@ -235,11 +240,11 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                     action_type="submit", message="time budget exceeded"
                 )
                 result = await env.step(action)
-                reward = result.reward or 0.0
+                reward = safe_score(result.reward or 0.01)
                 rewards.append(reward)
                 steps_taken = step
                 log_step(step, action_label(action), reward, True, None)
-                final_score = result.observation.final_score or 0.0
+                final_score = result.observation.final_score or 0.01
                 break
 
             # LLM call
@@ -271,7 +276,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 break
 
             obs = result.observation
-            reward = result.reward or 0.0
+            reward = safe_score(result.reward or 0.01)
             done = result.done
 
             # Validate reward is in expected range
@@ -291,7 +296,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
             messages.append({"role": "user", "content": format_observation(obs)})
 
             if done:
-                final_score = obs.final_score or 0.0
+                final_score = obs.final_score or 0.01
                 break
 
         success = final_score >= SUCCESS_SCORE_THRESHOLD
@@ -312,10 +317,10 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 result = await env.step(
                     VerirlAction(action_type="submit", message="safety submit")
                 )
-                final_score = result.observation.final_score or 0.0
+                final_score = result.observation.final_score or 0.01
                 success = final_score >= SUCCESS_SCORE_THRESHOLD
                 steps_taken += 1
-                log_step(steps_taken, "submit", result.reward or 0.0, True, None)
+                log_step(steps_taken, "submit", safe_score(result.reward or 0.01), True, None)
             except Exception:
                 pass
         try:
