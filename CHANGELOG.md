@@ -1,3 +1,9 @@
+## [0.3.4] - 2026-04-07
+
+Bug Fixes
+~~~~~~~~~
+
+- Clamp all task scores and step rewards to [0.01, 0.99] to satisfy Phase 2 validator strict (0, 1) boundary requirement (clamp-rewards)
 ## [0.3.3] - 2026-04-07
 
 Miscellaneous
