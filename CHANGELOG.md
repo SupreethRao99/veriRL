@@ -1,3 +1,6 @@
+## [0.3.7] - 2026-04-08
+No significant changes.
+
 ## [0.3.6] - 2026-04-08
 
 Bug Fixes
