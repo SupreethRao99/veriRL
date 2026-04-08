@@ -23,7 +23,7 @@ VeriRL frames this as a multi-step agentic task. The three tasks span the core b
 
 1. **MAC Unit** — a 2-stage pipelined multiply-accumulate unit, the arithmetic kernel inside every convolution and matrix-multiply accelerator
 2. **AXI-Stream FIFO** — a 4-entry FIFO with correct handshaking and backpressure, the standard interconnect protocol between datapath blocks
-3. **4×4 Systolic Array** — a weight-stationary matrix multiply engine with diagonal skewing and a 7-cycle latency requirement, structurally similar to the core of a TPU
+3. **4×4 Systolic Array** — a weight-stationary matrix multiply engine with diagonal skewing and a 10-cycle latency requirement, structurally similar to the core of a TPU
 
 Each task includes a detailed Verilog interface specification and a testbench that exercises correctness, edge cases, and (for tasks 1 and 3) timing behavior. Scores are computed by compiling agent submissions with `iverilog`, running functional simulation with `vvp`, and estimating area with `yosys` — the same open-source EDA toolchain used in academic and hobbyist chip design.
 
@@ -58,7 +58,7 @@ sequenceDiagram
     
     LLM->>Env: submit (or turn budget exhausted)
     Env->>EDA: Final complete evaluation
-    EDA-->>Env: Weighted Score [0, 1]
+    EDA-->>Env: Weighted Score [0.01, 0.99]
     Env-->>LLM: Final Score & Episode Done
 ```
 
@@ -93,7 +93,7 @@ Only one action is executed per step. Actions that have prerequisites (e.g., `ru
 | `turn_number` | `int` | Current turn (1-indexed after first step) |
 | `turns_remaining` | `int` | Steps left in the episode |
 | `current_verilog` | `str \| None` | The Verilog source currently on file |
-| `final_score` | `float \| None` | Final score in [0, 1] — set on `submit` or episode expiry |
+| `final_score` | `float \| None` | Final score in [0.01, 0.99] — set on `submit` or episode expiry |
 | `score_breakdown` | `dict \| None` | Per-dimension scores: `compile`, `sim`, `timing`, `area` |
 | `reward` | `float` | Per-step reward (see Reward Function below) |
 | `done` | `bool` | Whether the episode has ended |
@@ -120,7 +120,7 @@ A 4-entry synchronous FIFO implementing the AXI4-Stream handshake on both slave 
 
 **Testbench:** 34 assertions covering reset state, single push/pop, fill-to-full, drain-in-order, simultaneous enqueue/dequeue, downstream stall, partial drain with refill, and rapid push/pop interleaving.
 
-**Scoring weights:** compile 10% · functional correctness 40% · protocol compliance (backpressure, no data loss) 30% · area efficiency 20%
+**Scoring weights:** compile 10% · simulation (functional correctness + protocol compliance) 70% · area efficiency 20%
 
 ---
 
@@ -128,11 +128,11 @@ A 4-entry synchronous FIFO implementing the AXI4-Stream handshake on both slave 
 
 **Turn budget:** 12 | **Module:** `systolic_array`
 
-A 4×4 grid of processing elements computing C = A × B for INT8 activations and INT4 weights. Weights are preloaded and held stationary; activations flow left-to-right with diagonal skewing so that PE[i][j] receives its activation at cycle `i+j` from the start pulse. The `done` signal must assert within **7 clock cycles** of `start` — this requires implementing shift-register delay lines of depth `i` on each activation row.
+A 4×4 grid of processing elements computing C = A × B for INT8 activations and INT4 weights. Weights are preloaded and held stationary; activations flow left-to-right with diagonal skewing so that PE[i][j] receives its activation at cycle `i+j` from the start pulse. The `done` signal must assert within **10 clock cycles** of `start` — this requires implementing shift-register delay lines of depth `i` on each activation row. Designs that assert `done` after 10 but within 13 cycles receive partial timing credit.
 
 **Testbench:** 7 test cases with 76 individual output assertions, covering identity weights, zero weights, known-value matrix products, powers-of-two weights, single-column weights, uniform weights, and diagonal weights.
 
-**Scoring weights:** compile 5% · functional correctness 50% · timing (done ≤ 7 cycles) 30% · area efficiency 15%
+**Scoring weights:** compile 5% · functional correctness 50% · timing (done ≤ 10 cycles) 30% · area efficiency 15%
 
 ---
 
@@ -146,7 +146,7 @@ reward = +0.02  (any Verilog is on file)
        + 0.10 × (tests_passed / tests_total)        (absolute test ratio)
        + 0.15 × (Δ test ratio vs previous sim run)  (improvement bonus)
        - min(0.01 × turn_number, 0.05)              (time penalty, capped at 0.05)
-       clamped to [0.0, 1.0]
+       clamped to [0.01, 0.99]
 ```
 
 The improvement bonus rewards each incremental fix: fixing 5 failing tests in one step earns more than fixing 1. `write_file` resets the compile and simulation state so that all progress signals are tied to the current code on file.
@@ -257,8 +257,8 @@ Baseline agent: `openai/gpt-oss-120b` via Hugging Face inference router.
 The inference script includes task enumeration and grader validation (run before inference):
 - All 3 tasks discovered: `mac_unit`, `axi_fifo`, `systolic_array`
 - All graders tested with empty submission → all score 0.0 (valid)
-- All per-step rewards in valid range [-1.0, 1.0]
-- All final scores in valid range [0.0, 1.0]
+- All per-step rewards in valid range [0.01, 0.99]
+- All final scores in valid range [0.01, 0.99]
 
 **Interpretation:**
 - MAC unit (easy): 0.154 — some compilation/simulation credit, but test failures
