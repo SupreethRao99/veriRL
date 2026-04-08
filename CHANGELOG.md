@@ -1,3 +1,14 @@
+## [0.3.10] - 2026-04-08
+
+Bug Fixes
+~~~~~~~~~
+
+- Add score= field to [END] output line so autograder can extract per-task final scores (end-score-field)
+
+Documentation
+~~~~~~~~~~~~~
+
+- Corrected README and CLAUDE.md documentation: [END] format now includes score= field, reward/score ranges updated to [0.01, 0.99], AXI-FIFO scoring weights reflect actual single sim dimension (70%), systolic array timing limit corrected from 7 to 10 cycles (docs-audit)
 ## [0.3.9] - 2026-04-08
 
 Bug Fixes

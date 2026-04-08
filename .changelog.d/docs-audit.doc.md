@@ -1,1 +1,0 @@
-Corrected README and CLAUDE.md documentation: [END] format now includes score= field, reward/score ranges updated to [0.01, 0.99], AXI-FIFO scoring weights reflect actual single sim dimension (70%), systolic array timing limit corrected from 7 to 10 cycles
