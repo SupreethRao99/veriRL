@@ -245,7 +245,7 @@ class VerirlEnvironment(Environment):
             turns_remaining=self._max_turns,
             current_verilog=None,
             done=False,
-            reward=0.0,
+            reward=0.01,
         )
 
     def step(self, action: VerirlAction, **kwargs) -> VerirlObservation:

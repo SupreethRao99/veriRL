@@ -57,7 +57,7 @@ class TestMACUnit:
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
         )
-        assert result.final_score == 0.0
+        assert result.final_score == 0.01
         assert result.compilation.success is False
 
     def test_mac_broken_module(self, evaluator, environment):
@@ -145,7 +145,7 @@ class TestSystolicArray:
     def test_systolic_empty_submission(
         self, evaluator, environment, requires_eda_tools
     ):
-        """Empty submission must score 0.0."""
+        """Empty submission must score the minimum clamped value."""
         task = environment.tasks["systolic_array"]
         result = evaluator.grade(
             verilog_src="",
@@ -153,7 +153,7 @@ class TestSystolicArray:
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
         )
-        assert result.final_score == 0.0
+        assert result.final_score == 0.01
         assert result.compilation.success is False
 
     def test_systolic_broken_module(self, evaluator, environment, requires_eda_tools):
