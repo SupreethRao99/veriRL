@@ -21,7 +21,7 @@ STDOUT FORMAT
 
     [START] task=<task_name> env=<benchmark> model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
   Rules:
     - One [START] line at episode begin.
@@ -31,6 +31,7 @@ STDOUT FORMAT
     - done and success are lowercase booleans: true or false.
     - error is the raw last_action_error string, or null if none.
     - All fields on a single line with no newlines within a line.
+    - Each task's score must be strictly in (0, 1).
 
   Example:
     [START] task=mac_unit env=verirl model=Qwen2.5-72B-Instruct
