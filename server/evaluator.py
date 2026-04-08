@@ -345,10 +345,10 @@ class VerilogEvaluator:
                     elif cycles <= SYSTOLIC_TIMING_LIMIT + 3:
                         timing_score = 1.0 - (cycles - SYSTOLIC_TIMING_LIMIT) * 0.2
                         breakdown["timing"] = max(0.01, min(timing_score, 0.99))
-                elif breakdown["sim"] > 0:
+                elif sim.tests_passed > 0:
                     breakdown["timing"] = 0.20
 
-        # Step 5: Area scoring — gated on functional correctness (sim > 0)
+        # Step 5: Area scoring — gated on functional correctness (tests must pass)
         # Prevents a trivially small but wrong module from scoring high on area.
         if (
             "area" in breakdown
@@ -356,7 +356,7 @@ class VerilogEvaluator:
             and synth.success
             and synth.cell_count > 0
             and reference_cells > 0
-            and breakdown["sim"] > 0.0
+            and sim.tests_passed > 0
         ):
             ratio = reference_cells / synth.cell_count
             breakdown["area"] = max(0.01, min(ratio, 0.99))
