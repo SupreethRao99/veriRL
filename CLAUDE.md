@@ -258,7 +258,7 @@ The inference script MUST output ONLY these three line types to stdout:
 ```
 [START] task=<task> env=<benchmark> model=<model>
 [STEP] step=<n> action=<action> reward=<0.00> done=<true|false> error=<msg|null>
-[END] success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+[END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 ```
 
 NO other output to stdout (no comments, no validation messages, no summaries).
