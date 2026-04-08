@@ -281,10 +281,13 @@ class VerilogEvaluator:
             reference_cells: Reference synthesis cell count for area scoring
 
         Returns:
-            EvalResult with final_score in [0, 1] and per-dimension breakdown
+            EvalResult with final_score and all breakdown values strictly in (0, 1)
         """
         weights = TASK_WEIGHTS.get(task_id, {"compile": 1.0})
         breakdown: Dict[str, float] = {k: 0.0 for k in weights}
+
+        def _clamp_breakdown(d: Dict[str, float]) -> Dict[str, float]:
+            return {k: max(0.01, min(0.99, v)) for k, v in d.items()}
 
         if not verilog_src.strip():
             return EvalResult(
@@ -292,7 +295,7 @@ class VerilogEvaluator:
                     success=False, stdout="", stderr="Empty submission"
                 ),
                 final_score=0.01,
-                score_breakdown=breakdown,
+                score_breakdown=_clamp_breakdown(breakdown),
             )
 
         # Step 1: Compilation
@@ -301,7 +304,7 @@ class VerilogEvaluator:
             return EvalResult(
                 compilation=comp,
                 final_score=0.01,
-                score_breakdown=breakdown,
+                score_breakdown=_clamp_breakdown(breakdown),
             )
         breakdown["compile"] = 0.99  # Clamp to [0.01, 0.99]
 
@@ -342,10 +345,10 @@ class VerilogEvaluator:
                     elif cycles <= SYSTOLIC_TIMING_LIMIT + 3:
                         timing_score = 1.0 - (cycles - SYSTOLIC_TIMING_LIMIT) * 0.2
                         breakdown["timing"] = max(0.01, min(timing_score, 0.99))
-                elif breakdown["sim"] > 0:
+                elif sim.tests_passed > 0:
                     breakdown["timing"] = 0.20
 
-        # Step 5: Area scoring — gated on functional correctness (sim > 0)
+        # Step 5: Area scoring — gated on functional correctness (tests must pass)
         # Prevents a trivially small but wrong module from scoring high on area.
         if (
             "area" in breakdown
@@ -353,10 +356,13 @@ class VerilogEvaluator:
             and synth.success
             and synth.cell_count > 0
             and reference_cells > 0
-            and breakdown["sim"] > 0.0
+            and sim.tests_passed > 0
         ):
             ratio = reference_cells / synth.cell_count
             breakdown["area"] = max(0.01, min(ratio, 0.99))
+
+        # Clamp all breakdown values to (0, 1) — applies to every return path
+        breakdown = _clamp_breakdown(breakdown)
 
         raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
         # Validator requires scores strictly in (0, 1) — clamp to [0.01, 0.99]

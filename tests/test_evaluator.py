@@ -47,7 +47,7 @@ class TestMACUnit:
         assert result.simulation.tests_total > 0
         # Final score should be computed
         assert result.final_score is not None
-        assert 0.0 <= result.final_score <= 1.0
+        assert 0.01 <= result.final_score <= 0.99
 
     def test_mac_empty_submission(self, evaluator, environment):
         task = environment.tasks["mac_unit"]
@@ -140,7 +140,7 @@ class TestSystolicArray:
         # Score breakdown always present and timing score is in valid range
         assert result.score_breakdown is not None
         timing_score = result.score_breakdown.get("timing", -1.0)
-        assert 0.0 <= timing_score <= 1.0
+        assert 0.01 <= timing_score <= 0.99
 
     def test_systolic_empty_submission(
         self, evaluator, environment, requires_eda_tools
@@ -182,8 +182,9 @@ class TestSystolicArray:
             reference_cells=task.reference_cells,
         )
         assert result.compilation.success is True
-        # Sim should fail 100% of checks — only compile credit (5%)
-        assert result.final_score <= 0.05 + 1e-6
+        # Sim should fail 100% of checks — compile credit (5%) plus minimum floor (0.01)
+        # for each unevaluated component: 0.05×0.99 + (0.50+0.30+0.15)×0.01 = 0.059
+        assert result.final_score <= 0.059 + 1e-6
         if result.simulation:
             assert result.simulation.tests_passed == 0
 
@@ -214,7 +215,8 @@ class TestSystolicArray:
             reference_cells=task.reference_cells,
         )
         if result.score_breakdown:
-            assert result.score_breakdown.get("area", 0.0) == 0.0
+            # Area must not exceed minimum when no tests pass (gated on sim.tests_passed > 0)
+            assert result.score_breakdown.get("area", 0.01) <= 0.01
 
     def test_systolic_score_breakdown_keys(
         self, evaluator, environment, requires_eda_tools
@@ -250,7 +252,7 @@ class TestSystolicArray:
             "area",
         }
         for v in result.score_breakdown.values():
-            assert 0.0 <= v <= 1.0
+            assert 0.01 <= v <= 0.99
 
 
 class TestSynthesis:

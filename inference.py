@@ -332,6 +332,13 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 log_step(steps_taken, "submit", safe_score(result.reward or 0.01), True, None)
             except Exception:
                 pass
+        # Ensure final_score is never exactly 0.0 (validator requires strict (0, 1))
+        if final_score == 0.0:
+            final_score = 0.01
+        success = final_score >= SUCCESS_SCORE_THRESHOLD
+        # Ensure rewards list is never empty — [END] requires at least one reward value
+        if not rewards:
+            rewards = [0.01]
         if env is not None:
             try:
                 await env.close()
