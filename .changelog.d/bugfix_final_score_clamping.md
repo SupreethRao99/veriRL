@@ -1,6 +1,18 @@
-Fixed inference.py output format and score validation issues:
-- Clamp final_score to (0, 1) in all code paths (lines 251, 307, 328)
-- Move task_id validation inside try block to ensure [START] is always logged before errors
-- Initialize env=None to safely handle env.close() in finally block
-- Log failed env.step() calls with error details to prevent format mismatch
-- All rewards and scores now strictly within (0.01, 0.99) per validator requirement
+Fixed score clamping to ensure all task scores are strictly in [0.01, 0.99]:
+
+Server-side (evaluator.py) — authoritative clamping:
+- breakdown["compile"] = 0.99 (was 1.0, now clamped)
+- breakdown["sim"] = max(0.01, min(ratio, 0.99)) per test pass rate
+- breakdown["timing"] = max(0.01, min(..., 0.99)) for all task variants
+- breakdown["area"] = max(0.01, min(ratio, 0.99)) per reference cells
+- final_score = max(0.01, min(0.99, weighted_sum)) before return
+
+Inference-side (inference.py) — defensive clamping before output:
+- All step rewards: reward = safe_score(result.reward or 0.01)
+- All final_scores: final_score = safe_score(obs.final_score or 0.01)
+- Validation: apply safe_score() before checking task validity
+- All values in [END] rewards array are pre-clamped via safe_score()
+
+Models (models.py) — documentation:
+- Updated final_score descriptions to clarify [0.01, 0.99] range
+- Removed strict Pydantic validators (trust server guarantee)

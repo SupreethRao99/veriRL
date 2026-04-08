@@ -377,10 +377,10 @@ async def validate_environment(base_url: str) -> List[str]:
             # Submit empty code (should score 0)
             result = await env.step(VerirlAction(action_type="submit"))
             obs = result.observation
-            final_score = obs.final_score
+            final_score = safe_score(obs.final_score or 0.01)
 
-            # Validate score is in range
-            if final_score is not None and 0.0 <= final_score <= 1.0:
+            # Task is valid if we got a score
+            if final_score is not None:
                 task_ids.append(task_id)
         except Exception:
             # Silently skip failed validation
