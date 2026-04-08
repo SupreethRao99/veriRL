@@ -1,3 +1,9 @@
+## [0.3.8] - 2026-04-08
+
+Bug Fixes
+~~~~~~~~~
+
+- Fix task scores violating strict (0, 1) range requirement by clamping all breakdown components before returning, ensuring single-point validation of all score values (phase2-score-range)
 ## [0.3.7] - 2026-04-08
 No significant changes.
 
