@@ -1,3 +1,9 @@
+## [0.3.6] - 2026-04-08
+
+Bug Fixes
+~~~~~~~~~
+
+- Fixed reset() returning reward=0.0, which violated the strict (0, 1) score range required by the validator; reset now returns reward=0.01. (reset-reward-clamp)
 ## [0.3.5] - 2026-04-07
 
 Bug Fixes
