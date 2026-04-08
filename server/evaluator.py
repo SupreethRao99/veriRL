@@ -281,7 +281,7 @@ class VerilogEvaluator:
             reference_cells: Reference synthesis cell count for area scoring
 
         Returns:
-            EvalResult with final_score in [0, 1] and per-dimension breakdown
+            EvalResult with final_score and all breakdown values strictly in (0, 1)
         """
         weights = TASK_WEIGHTS.get(task_id, {"compile": 1.0})
         breakdown: Dict[str, float] = {k: 0.0 for k in weights}
@@ -357,6 +357,9 @@ class VerilogEvaluator:
         ):
             ratio = reference_cells / synth.cell_count
             breakdown["area"] = max(0.01, min(ratio, 0.99))
+
+        # Clamp all breakdown values to (0, 1) — single point of score validation
+        breakdown = {k: max(0.01, min(0.99, v)) for k, v in breakdown.items()}
 
         raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
         # Validator requires scores strictly in (0, 1) — clamp to [0.01, 0.99]

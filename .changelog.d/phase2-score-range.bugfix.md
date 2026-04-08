@@ -1,0 +1,1 @@
+Fix task scores violating strict (0, 1) range requirement by clamping all breakdown components before returning, ensuring single-point validation of all score values
