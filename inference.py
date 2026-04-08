@@ -21,7 +21,7 @@ STDOUT FORMAT
 
     [START] task=<task_name> env=<benchmark> model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
   Rules:
     - One [START] line at episode begin.
@@ -31,13 +31,14 @@ STDOUT FORMAT
     - done and success are lowercase booleans: true or false.
     - error is the raw last_action_error string, or null if none.
     - All fields on a single line with no newlines within a line.
+    - Each task's score must be strictly in (0, 1).
 
   Example:
     [START] task=mac_unit env=verirl model=Qwen2.5-72B-Instruct
     [STEP] step=1 action=write_file(312chars) reward=0.02 done=false error=null
     [STEP] step=2 action=run_compile reward=0.07 done=false error=null
     [STEP] step=3 action=submit reward=0.05 done=true error=null
-    [END] success=true steps=3 rewards=0.02,0.07,0.05
+    [END] success=true steps=3 score=0.47 rewards=0.02,0.07,0.05
 """
 
 import asyncio
@@ -118,10 +119,10 @@ def log_step(
     )
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, rewards: List[float], final_score: float) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={final_score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -344,7 +345,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 await env.close()
             except Exception:
                 pass
-        log_end(success=success, steps=steps_taken, rewards=rewards)
+        log_end(success=success, steps=steps_taken, rewards=rewards, final_score=final_score)
 
     return final_score
 
