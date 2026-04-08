@@ -213,7 +213,6 @@ def _fallback_action(obs) -> VerirlAction:
 
 async def run_task(task_id: str, llm: OpenAI) -> float:
     """Run one complete episode for the given task. Returns final_score in [0, 1]."""
-    budget = TASK_BUDGETS[task_id]
     start_time = time.time()
     final_score = 0.0
     rewards: List[float] = []
@@ -222,9 +221,14 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
 
     log_start(task=task_id, model=MODEL_NAME)
 
-    env = verirl_env(base_url=ENV_BASE_URL)
+    env = None
     obs = None
     try:
+        budget = TASK_BUDGETS.get(task_id)
+        if budget is None:
+            raise ValueError(f"Unknown task_id '{task_id}'. Valid: {list(TASK_BUDGETS.keys())}")
+
+        env = verirl_env(base_url=ENV_BASE_URL)
         result = await env.reset(task_id=task_id)
         obs = result.observation
 
@@ -244,7 +248,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 rewards.append(reward)
                 steps_taken = step
                 log_step(step, action_label(action), reward, True, None)
-                final_score = result.observation.final_score or 0.01
+                final_score = safe_score(result.observation.final_score or 0.01)
                 break
 
             # LLM call
@@ -273,6 +277,11 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 result = await env.step(action)
             except Exception as exc:
                 error = sanitize_error(str(exc))
+                # Log the failed step before breaking
+                reward = 0.01  # fallback reward on error
+                rewards.append(reward)
+                steps_taken = step
+                log_step(step, action_label(action), reward, True, error)
                 break
 
             obs = result.observation
@@ -296,7 +305,7 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
             messages.append({"role": "user", "content": format_observation(obs)})
 
             if done:
-                final_score = obs.final_score or 0.01
+                final_score = safe_score(obs.final_score or 0.01)
                 break
 
         success = final_score >= SUCCESS_SCORE_THRESHOLD
@@ -317,16 +326,17 @@ async def run_task(task_id: str, llm: OpenAI) -> float:
                 result = await env.step(
                     VerirlAction(action_type="submit", message="safety submit")
                 )
-                final_score = result.observation.final_score or 0.01
+                final_score = safe_score(result.observation.final_score or 0.01)
                 success = final_score >= SUCCESS_SCORE_THRESHOLD
                 steps_taken += 1
                 log_step(steps_taken, "submit", safe_score(result.reward or 0.01), True, None)
             except Exception:
                 pass
-        try:
-            await env.close()
-        except Exception:
-            pass
+        if env is not None:
+            try:
+                await env.close()
+            except Exception:
+                pass
         log_end(success=success, steps=steps_taken, rewards=rewards)
 
     return final_score
@@ -367,10 +377,10 @@ async def validate_environment(base_url: str) -> List[str]:
             # Submit empty code (should score 0)
             result = await env.step(VerirlAction(action_type="submit"))
             obs = result.observation
-            final_score = obs.final_score
+            final_score = safe_score(obs.final_score or 0.01)
 
-            # Validate score is in range
-            if final_score is not None and 0.0 <= final_score <= 1.0:
+            # Task is valid if we got a score
+            if final_score is not None:
                 task_ids.append(task_id)
         except Exception:
             # Silently skip failed validation

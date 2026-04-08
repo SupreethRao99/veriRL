@@ -51,7 +51,7 @@ class VerirlObservation(Observation):
         default=None, description="Current Verilog source on file"
     )
     final_score: Optional[float] = Field(
-        default=None, description="Final score in [0, 1] (set on submit or episode expiry)"
+        default=None, description="Final score in [0.01, 0.99] (set on submit or episode expiry)"
     )
     score_breakdown: Optional[Dict[str, float]] = Field(
         default=None, description="Per-dimension scores: compile, sim, timing, area"
@@ -69,5 +69,5 @@ class VerirlState(State):
     turns_remaining: int = Field(default=0, ge=0, description="Turns remaining")
     episode_done: bool = Field(default=False, description="Whether episode is over")
     final_score: Optional[float] = Field(
-        default=None, description="Final score if episode is done"
+        default=None, description="Final score in [0.01, 0.99] if episode is done"
     )

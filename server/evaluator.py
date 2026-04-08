@@ -303,12 +303,13 @@ class VerilogEvaluator:
                 final_score=0.01,
                 score_breakdown=breakdown,
             )
-        breakdown["compile"] = 1.0
+        breakdown["compile"] = 0.99  # Clamp to [0.01, 0.99]
 
         # Step 2: Simulation
         sim = self.simulate(verilog_src, testbench_path)
         if sim.tests_total > 0:
-            breakdown["sim"] = sim.tests_passed / sim.tests_total
+            ratio = sim.tests_passed / sim.tests_total
+            breakdown["sim"] = max(0.01, min(ratio, 0.99))
 
         # Step 3: Synthesis — always run if code compiles; area/timing use results below
         synth = self.synthesize(verilog_src)
@@ -330,20 +331,19 @@ class VerilogEvaluator:
                     dff_count = len(sdff_match)
 
                 if dff_count >= 2:
-                    breakdown["timing"] = 1.0
+                    breakdown["timing"] = 0.99
                 elif synth.cell_count >= 10:
-                    breakdown["timing"] = 0.5
+                    breakdown["timing"] = 0.50
             elif task_id == "systolic_array":
                 if sim.timing_cycles is not None:
                     cycles = sim.timing_cycles
                     if cycles <= SYSTOLIC_TIMING_LIMIT:
-                        breakdown["timing"] = 1.0
+                        breakdown["timing"] = 0.99
                     elif cycles <= SYSTOLIC_TIMING_LIMIT + 3:
-                        breakdown["timing"] = max(
-                            0.0, 1.0 - (cycles - SYSTOLIC_TIMING_LIMIT) * 0.2
-                        )
+                        timing_score = 1.0 - (cycles - SYSTOLIC_TIMING_LIMIT) * 0.2
+                        breakdown["timing"] = max(0.01, min(timing_score, 0.99))
                 elif breakdown["sim"] > 0:
-                    breakdown["timing"] = 0.2
+                    breakdown["timing"] = 0.20
 
         # Step 5: Area scoring — gated on functional correctness (sim > 0)
         # Prevents a trivially small but wrong module from scoring high on area.
@@ -355,7 +355,8 @@ class VerilogEvaluator:
             and reference_cells > 0
             and breakdown["sim"] > 0.0
         ):
-            breakdown["area"] = min(reference_cells / synth.cell_count, 1.0)
+            ratio = reference_cells / synth.cell_count
+            breakdown["area"] = max(0.01, min(ratio, 0.99))
 
         raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
         # Validator requires scores strictly in (0, 1) — clamp to [0.01, 0.99]
