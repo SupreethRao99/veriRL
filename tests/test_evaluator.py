@@ -182,8 +182,9 @@ class TestSystolicArray:
             reference_cells=task.reference_cells,
         )
         assert result.compilation.success is True
-        # Sim should fail 100% of checks — only compile credit (5%)
-        assert result.final_score <= 0.05 + 1e-6
+        # Sim should fail 100% of checks — compile credit (5%) plus minimum floor (0.01)
+        # for each unevaluated component: 0.05×0.99 + (0.50+0.30+0.15)×0.01 = 0.059
+        assert result.final_score <= 0.059 + 1e-6
         if result.simulation:
             assert result.simulation.tests_passed == 0
 
