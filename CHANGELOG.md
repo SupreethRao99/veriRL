@@ -1,3 +1,9 @@
+## [0.3.9] - 2026-04-08
+
+Bug Fixes
+~~~~~~~~~
+
+- Add score= field to [END] output line so autograder can extract per-task final scores (end-score-field)
 ## [0.3.8] - 2026-04-08
 
 Bug Fixes
