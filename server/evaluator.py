@@ -286,13 +286,16 @@ class VerilogEvaluator:
         weights = TASK_WEIGHTS.get(task_id, {"compile": 1.0})
         breakdown: Dict[str, float] = {k: 0.0 for k in weights}
 
+        def _clamp_breakdown(d: Dict[str, float]) -> Dict[str, float]:
+            return {k: max(0.01, min(0.99, v)) for k, v in d.items()}
+
         if not verilog_src.strip():
             return EvalResult(
                 compilation=CompilationResult(
                     success=False, stdout="", stderr="Empty submission"
                 ),
                 final_score=0.01,
-                score_breakdown=breakdown,
+                score_breakdown=_clamp_breakdown(breakdown),
             )
 
         # Step 1: Compilation
@@ -301,7 +304,7 @@ class VerilogEvaluator:
             return EvalResult(
                 compilation=comp,
                 final_score=0.01,
-                score_breakdown=breakdown,
+                score_breakdown=_clamp_breakdown(breakdown),
             )
         breakdown["compile"] = 0.99  # Clamp to [0.01, 0.99]
 
@@ -358,8 +361,8 @@ class VerilogEvaluator:
             ratio = reference_cells / synth.cell_count
             breakdown["area"] = max(0.01, min(ratio, 0.99))
 
-        # Clamp all breakdown values to (0, 1) — single point of score validation
-        breakdown = {k: max(0.01, min(0.99, v)) for k, v in breakdown.items()}
+        # Clamp all breakdown values to (0, 1) — applies to every return path
+        breakdown = _clamp_breakdown(breakdown)
 
         raw_score = round(sum(weights[k] * breakdown[k] for k in weights), 4)
         # Validator requires scores strictly in (0, 1) — clamp to [0.01, 0.99]
