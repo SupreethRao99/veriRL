@@ -1,0 +1,1 @@
+Added 7 new tasks (relu_clip, barrel_shifter, register_file, ring_buffer, dot_product, fir_filter, fp16_adder) bringing the total to 10; added formal verification via SymbiYosys; added multi-file Verilog project support with per-file write_file; added Modal Labs RLVR training script (GRPO + QLoRA on Qwen2.5-Coder-3B)

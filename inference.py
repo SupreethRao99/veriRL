@@ -66,9 +66,19 @@ BENCHMARK = "verirl"
 
 # Per-task wall-clock budgets (seconds) and success threshold
 TASK_BUDGETS: dict[str, int] = {
-    "mac_unit": 4 * 60,
-    "axi_fifo": 6 * 60,
-    "systolic_array": 8 * 60,
+    # easy
+    "mac_unit":        4 * 60,
+    "relu_clip":       3 * 60,
+    "barrel_shifter":  3 * 60,
+    # medium
+    "axi_fifo":        6 * 60,
+    "register_file":   5 * 60,
+    "ring_buffer":     6 * 60,
+    "dot_product":     5 * 60,
+    "fir_filter":      6 * 60,
+    # hard
+    "systolic_array":  8 * 60,
+    "fp16_adder":     10 * 60,
 }
 SUCCESS_SCORE_THRESHOLD = 0.5  # final_score in [0, 1]
 
@@ -77,25 +87,33 @@ SYSTEM_PROMPT = textwrap.dedent(
     You are an expert RTL hardware designer. Implement the given Verilog specification correctly.
 
     REQUIRED WORKFLOW — follow this sequence every episode:
-      1. write_file   — write a complete, synthesizable Verilog module (no `initial` blocks in design)
-      2. run_compile  — check for syntax errors; if errors appear, write_file again with fixes
+      1. write_file   — write a complete, synthesizable Verilog module.
+                        For multi-module designs use separate files:
+                        {"action_type": "write_file", "filename": "pe.v", "verilog_src": "..."}
+                        {"action_type": "write_file", "filename": "top.v", "verilog_src": "..."}
+      2. run_compile  — check all files for syntax errors; fix with write_file if needed
       3. run_sim      — run the testbench; read every PASS/FAIL line; fix failures with write_file
-      4. (repeat 2-3 until all tests pass or turns are low)
-      5. submit       — only submit after attempting compile and sim
+      4. (optional) run_formal — check formal properties if available; fix any counterexamples
+      5. (optional) run_synth  — check area against reference cell count
+      6. submit       — only after attempting compile and sim
 
-    NEVER submit without first running run_compile and run_sim — you will score 0 otherwise.
+    NEVER submit without first running run_compile and run_sim.
 
     Available actions — respond with exactly one JSON object, no markdown:
-      {"action_type": "write_file", "verilog_src": "<full module here>", "message": "reasoning"}
+      {"action_type": "write_file", "filename": "design.v", "verilog_src": "<full module>", "message": "..."}
       {"action_type": "run_compile", "message": "checking syntax"}
       {"action_type": "run_sim",     "message": "running testbench"}
       {"action_type": "run_synth",   "message": "checking area"}
+      {"action_type": "run_formal",  "message": "checking formal properties"}
+      {"action_type": "list_files",  "message": "show written files"}
       {"action_type": "submit",      "message": "final submission"}
 
     Design rules:
     - No `initial` blocks in the design module (testbench only)
     - Use always @(posedge clk) for sequential logic
+    - Fully combinational modules: use assign or always @(*)
     - Pay close attention to pipeline depth, pipeline registers, and timing requirements
+    - For tasks requiring multiple modules: use separate write_file calls with different filenames
     """
 ).strip()
 
@@ -158,9 +176,26 @@ def format_observation(obs) -> str:
         parts.append(f"TOOL OUTPUT:\n{obs.tool_stdout}")
     if obs.tool_stderr:
         parts.append(f"ERRORS:\n{obs.tool_stderr}")
+
+    # Multi-file project summary
+    if getattr(obs, "current_files", None):
+        file_summary = ", ".join(
+            f"{n}({len(s)}chars)" for n, s in sorted(obs.current_files.items())
+        )
+        parts.append(f"Files on disk: {file_summary}")
+
+    # Formal verification status
+    formal_proven = getattr(obs, "formal_properties_proven", None)
+    formal_total = getattr(obs, "formal_properties_total", None)
+    formal_str = (
+        f" | formal={formal_proven}/{formal_total}"
+        if formal_proven is not None else ""
+    )
+
     parts.append(
         f"Status: compile={'OK' if obs.compile_ok else 'FAIL'} | "
-        f"tests={obs.tests_passed}/{obs.tests_total} | "
+        f"tests={obs.tests_passed}/{obs.tests_total}"
+        f"{formal_str} | "
         f"turn={obs.turn_number} | remaining={obs.turns_remaining}"
     )
     return "\n\n".join(parts)
@@ -370,9 +405,16 @@ async def validate_environment(base_url: str) -> List[str]:
     """
     # Known tasks — these must be in the environment
     task_manifest = [
-        {"id": "mac_unit", "name": "Pipelined MAC Unit", "difficulty": "easy", "max_turns": 8},
-        {"id": "axi_fifo", "name": "AXI-Stream FIFO", "difficulty": "medium", "max_turns": 10},
-        {"id": "systolic_array", "name": "4x4 Systolic Array", "difficulty": "hard", "max_turns": 12},
+        {"id": "mac_unit",        "difficulty": "easy",   "max_turns": 8},
+        {"id": "relu_clip",       "difficulty": "easy",   "max_turns": 6},
+        {"id": "barrel_shifter",  "difficulty": "easy",   "max_turns": 6},
+        {"id": "axi_fifo",        "difficulty": "medium", "max_turns": 10},
+        {"id": "register_file",   "difficulty": "medium", "max_turns": 8},
+        {"id": "ring_buffer",     "difficulty": "medium", "max_turns": 10},
+        {"id": "dot_product",     "difficulty": "medium", "max_turns": 8},
+        {"id": "fir_filter",      "difficulty": "medium", "max_turns": 10},
+        {"id": "systolic_array",  "difficulty": "hard",   "max_turns": 12},
+        {"id": "fp16_adder",      "difficulty": "hard",   "max_turns": 15},
     ]
 
     task_ids = []
@@ -408,7 +450,11 @@ async def main() -> None:
     task_ids = await validate_environment(ENV_BASE_URL)
     if not task_ids:
         # Fallback: use hardcoded task list (validation may have failed due to network)
-        task_ids = ["mac_unit", "axi_fifo", "systolic_array"]
+        task_ids = [
+            "mac_unit", "relu_clip", "barrel_shifter",
+            "axi_fifo", "register_file", "ring_buffer", "dot_product", "fir_filter",
+            "systolic_array", "fp16_adder",
+        ]
 
     llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
