@@ -69,7 +69,7 @@ module tb_ring_buffer;
 
     initial begin
         clk=0; rst=1; push=0; pop=0; push_data=0;
-        @(posedge clk); @(posedge clk);
+        @(posedge clk); #1; @(posedge clk); #1;
         rst=0; @(posedge clk); #1;
 
         // Test 1-3: reset state
@@ -79,13 +79,13 @@ module tb_ring_buffer;
 
         // Test 4: push one item
         push=1; push_data=8'hAA;
-        @(posedge clk); push=0; #1;
+        @(posedge clk); #1; push=0; #1;
         check_flag(empty, 0, 4, "empty");
         check_count(1,       5);
         check_pop(8'hAA,     6);
 
         // Test 5: pop it back out
-        pop=1; @(posedge clk); pop=0; #1;
+        pop=1; @(posedge clk); #1; pop=0; #1;
         check_flag(empty, 1, 7, "empty");
         check_count(0,       8);
 
@@ -93,7 +93,7 @@ module tb_ring_buffer;
         push=1;
         for (i=1; i<=8; i=i+1) begin
             push_data = i[DATA_W-1:0];
-            @(posedge clk);
+            @(posedge clk); #1;
         end
         push=0; #1;
         check_flag(full, 1, 9, "full");
@@ -101,7 +101,7 @@ module tb_ring_buffer;
 
         // Test 7: push when full — ignored
         push=1; push_data=8'hFF;
-        @(posedge clk); push=0; #1;
+        @(posedge clk); #1; push=0; #1;
         check_flag(full, 1, 11, "full");
         check_count(8,      12);
 
@@ -109,7 +109,7 @@ module tb_ring_buffer;
         pop=1;
         for (i=1; i<=8; i=i+1) begin
             check_pop(i[DATA_W-1:0], 12+i); // tests 13..20
-            @(posedge clk);
+            @(posedge clk); #1;
         end
         pop=0; #1;
         check_flag(empty, 1, 21, "empty");
@@ -119,38 +119,38 @@ module tb_ring_buffer;
         @(posedge clk); #1;
         // now count=1; do simultaneous push+pop
         push=1; pop=1; push_data=8'h66;
-        @(posedge clk); push=0; pop=0; #1;
+        @(posedge clk); #1; push=0; pop=0; #1;
         check_count(1, 22); // was 1, +1-1=1
 
         // Test 10: wrap-around: push 8, pop 4, push 4 more, verify order
         // Start fresh
-        rst=1; @(posedge clk); rst=0; @(posedge clk); #1;
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
         push=1;
         for (i=0; i<8; i=i+1) begin
             push_data = 8'h10 + i[7:0];
-            @(posedge clk);
+            @(posedge clk); #1;
         end
-        push=0;
-        pop=1;
+        push=0; #1;
+        pop=1; #1;
         for (i=0; i<4; i=i+1) begin
             check_pop(8'h10 + i[7:0], 23+i); // tests 23..26
-            @(posedge clk);
+            @(posedge clk); #1;
         end
-        pop=0;
+        pop=0; #1;
         push=1;
         for (i=0; i<4; i=i+1) begin
             push_data = 8'h20 + i[7:0];
-            @(posedge clk);
+            @(posedge clk); #1;
         end
-        push=0;
-        pop=1;
+        push=0; #1;
+        pop=1; #1;
         for (i=4; i<8; i=i+1) begin
             check_pop(8'h10 + i[7:0], 27+i-4); // tests 27..30, expecting 0x14..0x17
-            @(posedge clk);
+            @(posedge clk); #1;
         end
         for (i=0; i<4; i=i+1) begin
             check_pop(8'h20 + i[7:0], 31+i); // tests 31..34
-            @(posedge clk);
+            @(posedge clk); #1;
         end
         pop=0; #1;
         check_flag(empty, 1, 35, "empty");

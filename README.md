@@ -17,74 +17,73 @@ An OpenEnv environment for training and evaluating language models on synthesiza
 
 ## Overview
 
-Writing correct synthesizable RTL is one of the harder practical tasks for current language models. The feedback loop is tight and formal: code either compiles, simulates correctly against a testbench, and meets timing, or it does not. There is no partial credit for "almost right" timing or "mostly correct" FSM logic — the EDA tools are the ground truth.
+Writing correct synthesizable RTL is one of the harder practical tasks for current language models. The feedback loop is tight and formal: code either compiles, simulates correctly against a testbench, and meets timing/area targets — or it does not. There is no partial credit for "almost right" logic; the EDA tools are the ground truth.
 
-VeriRL frames this as a multi-step agentic task. The three tasks span the core building blocks of an ML accelerator pipeline:
-
-1. **MAC Unit** — a 2-stage pipelined multiply-accumulate unit, the arithmetic kernel inside every convolution and matrix-multiply accelerator
-2. **AXI-Stream FIFO** — a 4-entry FIFO with correct handshaking and backpressure, the standard interconnect protocol between datapath blocks
-3. **4×4 Systolic Array** — a weight-stationary matrix multiply engine with diagonal skewing and a 10-cycle latency requirement, structurally similar to the core of a TPU
-
-Each task includes a detailed Verilog interface specification and a testbench that exercises correctness, edge cases, and (for tasks 1 and 3) timing behavior. Scores are computed by compiling agent submissions with `iverilog`, running functional simulation with `vvp`, and estimating area with `yosys` — the same open-source EDA toolchain used in academic and hobbyist chip design.
+VeriRL frames this as a multi-step agentic task covering the full ML accelerator primitive stack, from data movement to compute to activation functions. The environment exposes **10 tasks** spanning easy combinational blocks through hard multi-cycle pipelined designs, with optional formal verification via SymbiYosys for tasks that have safety-critical properties.
 
 ## Environment Design
 
-The agent interacts with the environment through a five-action loop that mirrors how a hardware engineer would approach a design:
+The agent interacts through a tool-use loop that mirrors how a hardware engineer works:
 
 ```mermaid
 sequenceDiagram
     participant LLM as Agent (LLM)
     participant Env as VeriRL Environment
-    participant EDA as EDA Tools (iverilog/yosys)
-    
+    participant EDA as EDA Tools (iverilog / yosys / sby)
+
     LLM->>Env: reset(task_id)
     Env-->>LLM: task_spec (Markdown)
-    
+
     loop Episodic Loop
-        alt Action: write_file
-            LLM->>Env: Verilog Code
-        else Action: run_compile
-            Env->>EDA: Syntax check
-            EDA-->>Env: Compilation Status / Errors
-        else Action: run_sim
-            Env->>EDA: Functional Simulation
-            EDA-->>Env: Tests Passed / Total
-        else Action: run_synth
-            Env->>EDA: Yosys Synthesis
-            EDA-->>Env: Area (Cell Count)
+        alt write_file
+            LLM->>Env: Verilog source (one file per call)
+        else run_compile
+            Env->>EDA: iverilog syntax check
+            EDA-->>Env: errors / warnings
+        else run_sim
+            Env->>EDA: iverilog + vvp vs testbench
+            EDA-->>Env: PASS/FAIL lines, CYCLES count
+        else run_synth
+            Env->>EDA: yosys synthesis + stat
+            EDA-->>Env: cell count, DFF count
+        else run_formal
+            Env->>EDA: SymbiYosys bounded model check
+            EDA-->>Env: properties proven / counterexample
+        else list_files
+            LLM->>Env: show workspace
+            Env-->>LLM: filenames + sizes
         end
-        Env-->>LLM: VerirlObservation (tool_stdout, reward, etc.)
+        Env-->>LLM: VerirlObservation (tool output, reward, …)
     end
-    
-    LLM->>Env: submit (or turn budget exhausted)
-    Env->>EDA: Final complete evaluation
-    EDA-->>Env: Weighted Score [0.01, 0.99]
-    Env-->>LLM: Final Score & Episode Done
+
+    LLM->>Env: submit  (or turn budget exhausted)
+    Env->>EDA: full grading pipeline
+    EDA-->>Env: weighted score [0.01, 0.99]
+    Env-->>LLM: final_score, score_breakdown, done
 ```
 
-The agent can iterate: fix compile errors, re-run simulation after test failures, check area, and submit when satisfied. Each task has a turn budget (8 / 10 / 12 turns for easy / medium / hard). Episodes also end automatically when the turn budget is exhausted, with a final grade computed on whatever code is on file.
-
-The server supports up to 10 concurrent WebSocket sessions, each with fully isolated episode state.
+The server supports up to 10 concurrent WebSocket sessions with fully isolated episode state (`SUPPORTS_CONCURRENT_SESSIONS = True`).
 
 ## Action Space
 
-`VerirlAction` — a Pydantic model with three fields:
+`VerirlAction` — a Pydantic model:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `action_type` | `str` | yes | One of: `write_file`, `run_compile`, `run_sim`, `run_synth`, `submit` |
-| `verilog_src` | `str \| None` | for `write_file` | Complete Verilog source code to submit |
-| `message` | `str \| None` | no | Agent reasoning note — logged but not graded. This allows Chain-of-Thought (CoT) reasoning to be recorded in the episode trajectory without cluttering the Verilog source code, which is highly beneficial for post-episode analysis or fine-tuning datasets. |
+| `action_type` | `str` | yes | One of: `write_file`, `run_compile`, `run_sim`, `run_synth`, `run_formal`, `list_files`, `submit` |
+| `verilog_src` | `str \| None` | for `write_file` | Complete Verilog source for one file |
+| `filename` | `str \| None` | for `write_file` | Target filename (default: `design.v`). Supports multi-file projects. |
+| `message` | `str \| None` | no | Agent reasoning note — logged for trajectory analysis, not graded |
 
-Only one action is executed per step. Actions that have prerequisites (e.g., `run_sim` before `write_file`) return an error in `tool_stderr` without consuming compilation state.
+**Multi-file support:** call `write_file` once per file with distinct filenames (e.g., `pe.v`, `controller.v`). All files are compiled and simulated together. The `list_files` action shows the current workspace.
 
 ## Observation Space
 
-`VerirlObservation` — returned after every `reset()` and `step()` call:
+`VerirlObservation` — returned after every `reset()` and `step()`:
 
 | Field | Type | Description |
 |---|---|---|
-| `task_spec` | `str` | Full markdown task specification (set on `reset`, empty on subsequent steps) |
+| `task_spec` | `str` | Full Markdown task specification (set on `reset`, empty on subsequent steps) |
 | `tool_stdout` | `str` | Standard output from the EDA tool that ran |
 | `tool_stderr` | `str` | Error output or environment error messages |
 | `compile_ok` | `bool` | Whether the current code compiles cleanly |
@@ -92,66 +91,210 @@ Only one action is executed per step. Actions that have prerequisites (e.g., `ru
 | `tests_total` | `int` | Total test assertions in the simulation |
 | `turn_number` | `int` | Current turn (1-indexed after first step) |
 | `turns_remaining` | `int` | Steps left in the episode |
-| `current_verilog` | `str \| None` | The Verilog source currently on file |
+| `current_verilog` | `str \| None` | Primary source file (`design.v`) for backward compatibility |
+| `current_files` | `dict[str, str]` | All files in the workspace: `{filename: source}` |
+| `formal_properties_proven` | `int \| None` | Properties proven by SymbiYosys (if `run_formal` was called) |
+| `formal_properties_total` | `int \| None` | Total formal properties checked |
 | `final_score` | `float \| None` | Final score in [0.01, 0.99] — set on `submit` or episode expiry |
-| `score_breakdown` | `dict \| None` | Per-dimension scores: `compile`, `sim`, `timing`, `area` |
+| `score_breakdown` | `dict \| None` | Per-dimension scores: `compile`, `sim`, `timing`, `area`, `formal` |
 | `reward` | `float` | Per-step reward (see Reward Function below) |
 | `done` | `bool` | Whether the episode has ended |
 
 ## Tasks
 
-### Task 1: Pipelined MAC Unit — Easy ([View Spec](problems/task1_mac/spec.md))
+Ten tasks, increasing in difficulty. All are AI-accelerator primitives.
 
-**Turn budget:** 8 | **Module:** `mac_unit`
+### Easy (turn budget: 6–8)
 
-A 2-stage pipelined multiply-accumulate unit for signed 8-bit integers with a 32-bit accumulator. Output is valid 2 clock cycles after inputs are presented. The agent must implement correct pipeline registers, synchronous reset, enable gating, and a `clear` signal that respects pipeline latency.
+#### Task 1: Pipelined MAC Unit ([spec](problems/task1_mac/spec.md))
+**Module:** `mac_unit` | **Turns:** 8
 
-**Testbench:** 22 assertions covering single accumulations, back-to-back pipeline fill, negative inputs, enable hold, clear-in-flight, boundary values, and continuous accumulation sequences.
+A 2-stage pipelined multiply-accumulate unit for signed 8-bit integers with a 32-bit accumulator. Must implement correct pipeline registers, synchronous reset, enable gating, and a `clear` signal that respects pipeline latency.
 
-**Scoring weights:** compile 10% · simulation 60% · pipeline structure (DFF count via synthesis) 20% · area efficiency 10%
+**Testbench:** 22 assertions — single accumulations, back-to-back pipeline fill, negative inputs, enable hold, clear-in-flight, boundary values.
 
----
-
-### Task 2: AXI-Stream FIFO — Medium ([View Spec](problems/task2_axi_fifo/spec.md))
-
-**Turn budget:** 10 | **Module:** `axi_fifo #(.DATA_W=8)`
-
-A 4-entry synchronous FIFO implementing the AXI4-Stream handshake on both slave (input) and master (output) interfaces. The agent must implement correct `valid`/`ready` handshaking, backpressure propagation, circular buffer pointer arithmetic, and `full`/`empty` status flags. A sender must never have data dropped when the receiver stalls.
-
-**Testbench:** 34 assertions covering reset state, single push/pop, fill-to-full, drain-in-order, simultaneous enqueue/dequeue, downstream stall, partial drain with refill, and rapid push/pop interleaving.
-
-**Scoring weights:** compile 10% · simulation (functional correctness + protocol compliance) 70% · area efficiency 20%
+**Scoring:** compile 10% · simulation 60% · pipeline structure (DFF count) 20% · area 10%
 
 ---
 
-### Task 3: 4×4 Weight-Stationary Systolic Array — Hard ([View Spec](problems/task3_systolic/spec.md))
+#### Task 4: Parameterized ReLU-Clip Unit ([spec](problems/task4_relu_clip/spec.md))
+**Module:** `relu_clip #(.IN_W, .OUT_W)` | **Turns:** 6 | **Formal:** ✓
 
-**Turn budget:** 12 | **Module:** `systolic_array`
+Fully combinational ReLU activation followed by saturating cast to a narrower unsigned integer — the activation primitive in every quantized neural-network inference pipeline.
 
-A 4×4 grid of processing elements computing C = A × B for INT8 activations and INT4 weights. Weights are preloaded and held stationary; activations flow left-to-right with diagonal skewing so that PE[i][j] receives its activation at cycle `i+j` from the start pulse. The `done` signal must assert within **10 clock cycles** of `start` — this requires implementing shift-register delay lines of depth `i` on each activation row. Designs that assert `done` after 10 but within 13 cycles receive partial timing credit.
+**Testbench:** exhaustive corner cases (negative, zero, in-range, above-MAX_OUT). **Formal properties (6):** negative→zero, in-range passthrough, upper saturation, `saturated` flag, no X/Z.
 
-**Testbench:** 7 test cases with 76 individual output assertions, covering identity weights, zero weights, known-value matrix products, powers-of-two weights, single-column weights, uniform weights, and diagonal weights.
+**Scoring:** compile 10% · simulation 75% · formal verification 10% · area 5%
 
-**Scoring weights:** compile 5% · functional correctness 50% · timing (done ≤ 10 cycles) 30% · area efficiency 15%
+---
+
+#### Task 5: Parameterized Barrel Shifter ([spec](problems/task5_barrel_shifter/spec.md))
+**Module:** `barrel_shifter #(.WIDTH)` | **Turns:** 6
+
+Fully combinational barrel shifter supporting left shift, logical right shift, and arithmetic right shift for any `WIDTH`. Controlled by `direction` and `arithmetic` select bits.
+
+**Testbench:** left/logical-right/arithmetic-right shifts at all amounts, sign extension verification.
+
+**Scoring:** compile 10% · simulation 80% · area 10%
+
+---
+
+### Medium (turn budget: 8–10)
+
+#### Task 2: AXI-Stream FIFO ([spec](problems/task2_axi_fifo/spec.md))
+**Module:** `axi_fifo #(.DATA_W=8)` | **Turns:** 10
+
+A 4-entry synchronous FIFO implementing the AXI4-Stream handshake on both slave (input) and master (output) interfaces. Correct `valid`/`ready` handshaking, backpressure propagation, and `full`/`empty` flags required.
+
+**Testbench:** 34 assertions — reset state, fill-to-full, drain-in-order, simultaneous enqueue/dequeue, downstream stall, rapid interleaving.
+
+**Scoring:** compile 10% · simulation 70% · area 20%
+
+---
+
+#### Task 6: Dual-Read Register File ([spec](problems/task6_register_file/spec.md))
+**Module:** `register_file #(.ADDR_W=5, .DATA_W=32)` | **Turns:** 8 | **Formal:** ✓
+
+RISC-style register file with two asynchronous read ports, one synchronous write port, and register 0 hardwired to zero — the standard register file for an inference-engine control path.
+
+**Testbench:** write-read round-trips, r0 zero invariant, simultaneous dual-read, write priority. **Formal properties:** r0=0 always, write-then-read consistency.
+
+**Scoring:** compile 10% · simulation 70% · formal verification 10% · area 10%
+
+---
+
+#### Task 7: Parameterized Ring Buffer ([spec](problems/task7_ring_buffer/spec.md))
+**Module:** `ring_buffer #(.DEPTH, .DATA_W)` | **Turns:** 10
+
+Power-of-2-depth circular FIFO with `push`/`pop` interface, `full`/`empty` flags, and `count` output — the standard data structure for KV-cache management in inference accelerators.
+
+**Testbench:** push-until-full, pop-until-empty, simultaneous push+pop, wrap-around pointer arithmetic, count accuracy.
+
+**Scoring:** compile 10% · simulation 70% · area 20%
+
+---
+
+#### Task 8: Pipelined INT8 Dot Product ([spec](problems/task8_dot_product/spec.md))
+**Module:** `dot_product_4` | **Turns:** 8
+
+2-stage pipelined unit computing the dot product of two 4-element signed INT8 vectors — the innermost operation in attention score and fully-connected layer computation.
+
+**Testbench:** known-value vectors, zero vectors, pipeline latency verification, `valid` signal propagation.
+
+**Scoring:** compile 10% · simulation 60% · pipeline structure (DFF count) 20% · area 10%
+
+---
+
+#### Task 9: 3-Tap FIR Filter ([spec](problems/task9_fir_filter/spec.md))
+**Module:** `fir3` | **Turns:** 10
+
+Direct-form I 3-tap FIR filter: `y[n] = h0·x[n] + h1·x[n-1] + h2·x[n-2]` with signed 8-bit samples and programmable coefficients. Output latency of 1 clock cycle.
+
+**Testbench:** impulse response, step response, coefficient sweep, delay-line correctness, `valid` propagation.
+
+**Scoring:** compile 10% · simulation 60% · pipeline structure (DFF count) 20% · area 10%
+
+---
+
+### Hard (turn budget: 12–15)
+
+#### Task 3: 4×4 Weight-Stationary Systolic Array ([spec](problems/task3_systolic/spec.md))
+**Module:** `systolic_array` | **Turns:** 12
+
+A 4×4 grid of PEs computing C = A × B for INT8 activations and INT4 weights. Activations must be diagonally skewed (PE[i][j] receives its activation at cycle `i` from `start`). The `done` signal must assert within **10 clock cycles** of `start`.
+
+**Testbench:** 7 test cases with 76 output assertions — identity, zero, known-value products, powers-of-two, uniform and diagonal weights.
+
+**Scoring:** compile 5% · simulation 50% · timing (done ≤ 10 cycles) 30% · area 15%
+
+---
+
+#### Task 10: IEEE 754 FP16 Adder ([spec](problems/task10_fp16_adder/spec.md))
+**Module:** `fp16_adder` | **Turns:** 15 | **Formal:** ✓
+
+Combinational IEEE 754 half-precision floating-point adder handling normal numbers, zero, infinity, and NaN propagation. Rounding toward zero. This is the arithmetic primitive of every GPU tensor core.
+
+**Testbench:** normal addition, subtraction, infinity propagation, NaN propagation, ∞ − ∞ = NaN, zero handling, alignment shifts. **Formal properties:** NaN propagation, infinity arithmetic, zero identity.
+
+**Scoring:** compile 5% · simulation 60% · formal verification 15% · area 20%
 
 ---
 
 ## Reward Function
 
-The environment provides a dense per-step reward signal to guide the agent's tool use strategy:
+Dense per-step reward signal:
 
 ```
 reward = +0.02  (any Verilog is on file)
-       + 0.05  (current code compiles)
-       + 0.10 × (tests_passed / tests_total)        (absolute test ratio)
-       + 0.15 × (Δ test ratio vs previous sim run)  (improvement bonus)
-       - min(0.01 × turn_number, 0.05)              (time penalty, capped at 0.05)
+       + 0.05  (current code compiles cleanly)
+       + 0.10 × (tests_passed / tests_total)          (absolute test ratio)
+       + 0.15 × Δ(test ratio vs previous sim run)     (improvement bonus)
+       + 0.05 × (formal_proven / formal_total)        (if run_formal was called)
+       - min(0.01 × turn_number, 0.05)                (time penalty, capped)
        clamped to [0.01, 0.99]
 ```
 
-The improvement bonus rewards each incremental fix: fixing 5 failing tests in one step earns more than fixing 1. `write_file` resets the compile and simulation state so that all progress signals are tied to the current code on file.
+The final score (on `submit` or episode expiry) is the weighted EDA-tool score in [0.01, 0.99] as described per task. This is distinct from the per-step reward and is what is reported as the task score. All scores are strictly clamped to [0.01, 0.99] — never 0.0 or 1.0 — for training stability.
 
-The final score (on `submit` or episode expiry) is the weighted EDA-tool score in [0, 1] as described per task above. This is distinct from the cumulative per-step reward and is what is reported as the task score.
+## RLVR Training
+
+VeriRL ships a full RLVR training stack for fine-tuning a code LLM using GRPO on Modal Labs A100 GPUs.
+
+**Algorithm:** GRPO (Group Relative Policy Optimization) via TRL  
+**Model:** `Qwen/Qwen2.5-Coder-3B-Instruct` with QLoRA (NF4 4-bit, rank 64)  
+**Infrastructure:** Modal Labs A100-80GB, checkpoints volume, HF Hub push
+
+### Setup
+
+```bash
+# Install training dependencies
+uv sync --extra training
+
+# Deploy the VeriRL server (or point at a hosted HF Space)
+docker run -p 8000:8000 ghcr.io/SupreethRao99/veriRL:latest
+
+# Create the Modal secret
+modal secret create verirl-training \
+    HF_TOKEN=hf_xxx \
+    WANDB_API_KEY=wandb_xxx \
+    VERIRL_ENV_URL=https://your-space.hf.space
+```
+
+### Run training
+
+```bash
+# Standard QLoRA GRPO (recommended)
+modal run training/train.py
+
+# With vLLM colocate mode (faster generation, higher memory)
+modal run training/train.py::train_vllm
+
+# Connectivity smoke test (no GPU, verifies env is reachable)
+modal run training/train.py::smoke_test
+```
+
+### Training configuration
+
+All hyperparameters live in [`config.yaml`](config.yaml):
+
+```yaml
+training:
+  model:
+    base_model: Qwen/Qwen2.5-Coder-3B-Instruct
+    hf_output_repo: SupreethRao99/verirl-rlvr-qwen2.5-coder-3b
+  grpo:
+    num_generations: 6       # G in GRPO
+    max_steps: 500
+    learning_rate: 5.0e-6
+    kl_coeff: 0.05           # β — KL penalty
+  curriculum:
+    task_difficulty_weights:
+      easy: 0.40             # mac_unit, relu_clip, barrel_shifter
+      medium: 0.40           # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
+      hard: 0.20             # systolic_array, fp16_adder
+```
+
+The curriculum sampler draws tasks weighted by difficulty bucket. Task specs are read from disk at dataset-build time — no server required for the training data pipeline.
 
 ## Setup
 
@@ -167,53 +310,54 @@ The final score (on `submit` or episode expiry) is the weighted EDA-tool score i
   # Ubuntu/Debian
   apt-get install iverilog yosys
   ```
+- `sby` (SymbiYosys) for formal verification (optional — gracefully skipped if not installed):
+  ```bash
+  # macOS
+  brew install symbiyosys
+
+  # Ubuntu/Debian
+  apt-get install symbiyosys
+  ```
 
 ### Install
 
 ```bash
-uv sync
+uv sync              # core runtime
+uv sync --extra dev  # + pytest, towncrier
 ```
 
-### Configuration / Environment Variables
-
-The inference script and environment support the following configuration variables:
+### Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | None | API key for standard OpenAI / Hugging Face Router models. |
-| `HF_TOKEN` | None | Alternative for Hugging Face inference tokens. |
-| `API_BASE_URL` | `https://router.huggingface.co/v1` | URL for the LLM Inference API. |
-| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | The specific model to query. |
-| `ENV_BASE_URL` | `http://localhost:8000` | Where the VeriRL server is running. |
-| `VERIRL_PROBLEMS_DIR` | `<auto-detected>` | Overrides the path to the `/problems` directory. |
+| `OPENAI_API_KEY` | None | API key for standard OpenAI / Hugging Face Router models |
+| `HF_TOKEN` | None | Hugging Face inference token |
+| `API_BASE_URL` | `https://router.huggingface.co/v1` | LLM inference API endpoint |
+| `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Model to use for inference |
+| `ENV_BASE_URL` | `http://localhost:8000` | VeriRL server URL |
+| `VERIRL_PROBLEMS_DIR` | `<auto-detected>` | Override path to the `problems/` directory |
+| `VERIRL_ENV_URL` | `http://localhost:8000` | Environment URL for Modal training (set as Modal secret) |
 
 ### Run the server
 
 ```bash
-uvicorn server.app:app --reload
-# or
-uv run --project . server
-# or on a custom port
+uv run --project . server          # production
+uvicorn server.app:app --reload    # development with hot-reload
 uv run --project . server --port 8001
 ```
 
 ### Run the inference script
 
-The inference script connects to a running server and runs the baseline agent against all three tasks.
-
 ```bash
-# Set required environment variables
-# API key — uses first available of:
-export OPENAI_API_KEY=<your_key>   # OpenAI or compatible provider
-# export HF_TOKEN=<your_token>     # Hugging Face inference router
-export API_BASE_URL=https://router.huggingface.co/v1   # default
-export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct            # default
-export ENV_BASE_URL=http://localhost:8000              # default
+export OPENAI_API_KEY=<your_key>
+export API_BASE_URL=https://router.huggingface.co/v1  # default
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct           # default
+export ENV_BASE_URL=http://localhost:8000             # default
 
 python inference.py
 ```
 
-The script emits structured logs in the required `[START]` / `[STEP]` / `[END]` format and prints a summary table at completion.
+The script emits structured logs in `[START]` / `[STEP]` / `[END]` format.
 
 ### Docker
 
@@ -225,91 +369,78 @@ docker run -p 8000:8000 verirl-env:latest
 ### Deploy to Hugging Face Spaces
 
 **Automatic on every merge to main:**
-GitHub Actions CI/CD pipeline validates, builds Docker image, and deploys:
 
 1. Create feature branch: `git checkout -b feature/xyz`
-2. Make changes + create changelog fragment
-3. Create pull request to main
-4. CI checks run (openenv validate, docker build)
-5. Merge to main when checks pass
-6. Auto-releases + deploys to HF Spaces ✓
+2. Make changes + create a changelog fragment in `.changelog.d/`
+3. Open a pull request to `main`
+4. CI checks run (`openenv validate`, `docker build`)
+5. Merge when checks pass → auto-deploys to HF Spaces
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and [.github/DEPLOYMENT.md](.github/DEPLOYMENT.md) for details.
-
-**Manual:**
-```bash
-export HF_TOKEN=<your_hf_token>
-openenv push --repo-id your-org/verirl-env
-```
-
-## Baseline Scores
-
-Baseline agent: `openai/gpt-oss-120b` via Hugging Face inference router.
-
-| Task | Difficulty | Score |
-|---|---|---|
-| mac_unit | easy | 0.154 |
-| axi_fifo | medium | 0.650 |
-| systolic_array | hard | 0.000 |
-| **mean** | | **0.268** |
-
-**Validation:**
-The inference script includes task enumeration and grader validation (run before inference):
-- All 3 tasks discovered: `mac_unit`, `axi_fifo`, `systolic_array`
-- All graders tested with empty submission → all score 0.0 (valid)
-- All per-step rewards in valid range [0.01, 0.99]
-- All final scores in valid range [0.01, 0.99]
-
-**Interpretation:**
-- MAC unit (easy): 0.154 — some compilation/simulation credit, but test failures
-- AXI FIFO (medium): 0.650 — good protocol understanding, partial correctness on edge cases  
-- Systolic array (hard): 0.000 — did not attempt (timing constraint is challenging)
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full workflow.
 
 ## Project Structure
 
 ```
 verirl_env/
-├── openenv.yaml                     # OpenEnv manifest
+├── config.yaml                      # Central configuration (server, inference, training, Modal)
+├── Makefile                         # Developer targets (serve, test, train, docker)
 ├── pyproject.toml                   # Package metadata and dependencies
 ├── inference.py                     # Baseline inference script
 ├── models.py                        # VerirlAction, VerirlObservation, VerirlState
 ├── client.py                        # WebSocket client (VerirlEnv)
 ├── problems/
-│   ├── task1_mac/
-│   │   ├── spec.md                  # Task specification
-│   │   ├── testbench.v              # Icarus Verilog testbench (22 assertions)
-│   │   └── reference.v              # Reference implementation
-│   ├── task2_axi_fifo/
+│   ├── task1_mac/                   # Pipelined MAC Unit (easy, 8 turns)
 │   │   ├── spec.md
-│   │   ├── testbench.v              # 34 assertions
+│   │   ├── testbench.v              # 22 assertions
 │   │   └── reference.v
-│   └── task3_systolic/
-│       ├── spec.md
-│       ├── testbench.v              # 76 assertions across 7 test cases
-│       └── reference.v
+│   ├── task2_axi_fifo/              # AXI-Stream FIFO (medium, 10 turns)
+│   ├── task3_systolic/              # 4×4 Systolic Array (hard, 12 turns)
+│   ├── task4_relu_clip/             # ReLU-Clip Unit (easy, 6 turns, formal)
+│   │   ├── spec.md
+│   │   ├── testbench.v
+│   │   ├── reference.v
+│   │   └── properties.sv            # SymbiYosys formal properties (6 assertions)
+│   ├── task5_barrel_shifter/        # Barrel Shifter (easy, 6 turns)
+│   ├── task6_register_file/         # Register File (medium, 8 turns, formal)
+│   │   └── properties.sv
+│   ├── task7_ring_buffer/           # Ring Buffer (medium, 10 turns)
+│   ├── task8_dot_product/           # INT8 Dot Product (medium, 8 turns)
+│   ├── task9_fir_filter/            # 3-Tap FIR Filter (medium, 10 turns)
+│   └── task10_fp16_adder/           # IEEE 754 FP16 Adder (hard, 15 turns, formal)
+│       └── properties.sv
 ├── server/
 │   ├── app.py                       # FastAPI application (REST + WebSocket)
-│   ├── verirl_env_environment.py    # Environment logic (reset / step / state)
-│   ├── evaluator.py                 # EDA tool wrappers (iverilog, yosys)
+│   ├── verirl_env_environment.py    # Environment logic (reset / step / grading)
+│   ├── evaluator.py                 # EDA tool wrappers (iverilog, yosys, sby)
 │   └── Dockerfile
+├── training/
+│   ├── train.py                     # Modal entry point (GRPO training functions)
+│   ├── trainer.py                   # Model loading + GRPOTrainer setup
+│   ├── config.py                    # TrainConfig dataclass + YAML loading
+│   ├── curriculum.py                # Task sampling by difficulty + system prompt
+│   ├── dataset.py                   # GRPO dataset builder (reads specs from disk)
+│   ├── environment.py               # VerirlToolEnv for TRL environment_factory
+│   └── reward.py                    # reward_func for GRPOTrainer
 └── tests/
-    ├── test_environment.py
-    ├── test_evaluator.py
-    ├── test_models.py
-    └── test_integration.py
+    ├── conftest.py                  # Shared fixtures (reference Verilog, EDA skips)
+    ├── test_environment.py          # Environment step/reset/reward tests
+    ├── test_evaluator.py            # EDA tool wrapper tests
+    ├── test_new_tasks.py            # Tests for tasks 4–10 (reset, compile, sim, grade)
+    ├── test_models.py               # Pydantic model tests
+    └── test_integration.py          # End-to-end server tests
 ```
 
 ## Running Tests
 
 ```bash
-pytest
-# with coverage
-pytest --cov
+pytest                 # all tests (EDA tests auto-skip if tools not installed)
+pytest --cov           # with coverage report
+pytest -k "not integration"  # skip server integration tests
 ```
 
-## Troubleshooting & FAQ
+## Troubleshooting
 
-*   **Synthesis fails with "timeout" error:**
-    If the agent generates extremely deep combinatorial loops or massive unrolled blocks, Yosys synthesis can hang. The environment deliberately caps execution (`SYNTH_TIMEOUT=60`) and fails the step gracefully.
-*   **"iverilog not found" on Windows:**
-    The easiest way to run the environment natively on Windows is through WSL2 or via Docker (see the Docker section above).
+- **Synthesis timeout:** Yosys caps at 60s (`SYNTH_TIMEOUT`). Deep combinatorial loops in agent code will fail gracefully — no hang.
+- **Formal verification skipped:** If `sby` is not installed, `run_formal` returns an INFO message and the formal weight is redistributed to simulation in the final score.
+- **"iverilog not found" on Windows:** Use WSL2 or Docker.
+- **Modal training: "module not found":** Ensure `modal secret create verirl-training` has been run and `VERIRL_ENV_URL` points to a live environment server.

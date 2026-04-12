@@ -50,15 +50,15 @@ module tb_fir3;
         input signed [7:0] sample;
         begin
             x = sample; valid_in = 1;
-            @(posedge clk); valid_in = 0; x = 0;
+            @(posedge clk); #1; valid_in = 0; x = 0;
             #1; // combinational settle after posedge
         end
     endtask
 
     initial begin
         clk=0; rst=1; valid_in=0; x=0; h0=0; h1=0; h2=0;
-        @(posedge clk); @(posedge clk);
-        rst=0; @(posedge clk);
+        @(posedge clk); #1; @(posedge clk); #1;
+        rst=0; @(posedge clk); #1;
 
         // ==========================================================
         // Test Group 1: h=[1,0,0] (pure delay — y[n] = x[n])
@@ -78,7 +78,7 @@ module tb_fir3;
         // ==========================================================
         // Test Group 2: h=[1,1,1] — 3-sample moving average (×3)
         // ==========================================================
-        rst=1; @(posedge clk); rst=0; @(posedge clk);
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
         h0=8'sd1; h1=8'sd1; h2=8'sd1;
 
         drive_sample(8'sd1);   // history: d1=0, d2=0
@@ -96,7 +96,7 @@ module tb_fir3;
         // ==========================================================
         // Test Group 3: h=[1,2,3] — step response x=5 repeated
         // ==========================================================
-        rst=1; @(posedge clk); rst=0; @(posedge clk);
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
         h0=8'sd1; h1=8'sd2; h2=8'sd3;
 
         drive_sample(8'sd5);   // d1=0, d2=0
@@ -115,7 +115,7 @@ module tb_fir3;
         // Test Group 4: negative coefficients h=[-1,2,-1]
         // Laplacian-like kernel — zero sum, detects changes
         // ==========================================================
-        rst=1; @(posedge clk); rst=0; @(posedge clk);
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
         h0=-8'sd1; h1=8'sd2; h2=-8'sd1;
 
         drive_sample(8'sd0);
@@ -133,7 +133,7 @@ module tb_fir3;
         // ==========================================================
         // Test Group 5: valid_in=0 should not update history or valid_out
         // ==========================================================
-        rst=1; @(posedge clk); rst=0; @(posedge clk);
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
         h0=8'sd1; h1=8'sd1; h2=8'sd1;
 
         drive_sample(8'sd3);   // push 3 into history, d1=3
@@ -152,7 +152,7 @@ module tb_fir3;
         // ==========================================================
         h0=8'sd1; h1=8'sd1; h2=8'sd1;
         drive_sample(8'sd10);  // load 10 into history
-        rst=1; @(posedge clk); rst=0; @(posedge clk);
+        rst=1; @(posedge clk); #1; rst=0; @(posedge clk); #1;
 
         drive_sample(8'sd1);
         check_y(18'sd1, 19);   // history cleared: 1*1 + 1*0 + 1*0 = 1

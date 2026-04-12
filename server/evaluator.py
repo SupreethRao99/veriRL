@@ -194,6 +194,16 @@ TASK_WEIGHTS: Dict[str, Dict[str, float]] = {
 
 SYSTOLIC_TIMING_LIMIT = 10
 
+# Yosys stat output uses cell names like $_DFF_P_, $_DFF_N_, $_SDFF_PP0_, etc.
+# Each line looks like:  "    $_SDFF_PP0_                     8"
+# Sum all DFF-family cell instance counts.
+_DFF_CELL_RE = re.compile(r"\$_[A-Z]*DFF[A-Z0-9_]*\s+(\d+)", re.MULTILINE)
+
+
+def _count_dffs(synth_stdout: str) -> int:
+    """Return total DFF instance count from yosys stat output."""
+    return sum(int(m) for m in _DFF_CELL_RE.findall(synth_stdout))
+
 
 # ---------------------------------------------------------------------------
 # Evaluator
@@ -399,8 +409,12 @@ class VerilogEvaluator:
             import shutil as _shutil
             _shutil.copy(properties_path, props_dest)
 
-            # Determine top module from properties filename
-            props_stem = Path(properties_path).stem  # e.g. "relu_clip_formal"
+            # Parse the top module name from the properties file itself.
+            # Cannot use the file stem ("properties") — the module name is
+            # defined inside, e.g. "module relu_clip_formal #(...)".
+            props_text = Path(properties_path).read_text()
+            top_match = re.search(r"^\s*module\s+(\w+)", props_text, re.MULTILINE)
+            top_module = top_match.group(1) if top_match else Path(properties_path).stem
 
             # Build sby config
             read_cmds = "\n".join(f"read -formal {p}" for p in design_paths)
@@ -415,11 +429,8 @@ smtbmc
 [script]
 {read_cmds}
 read -formal {props_dest}
-prep -top {props_stem}
+prep -top {top_module}
 
-[files]
-{chr(10).join(design_paths)}
-{props_dest}
 """
             sby_file = os.path.join(tmpdir, "verify.sby")
             with open(sby_file, "w") as f:
@@ -542,13 +553,7 @@ prep -top {props_stem}
         # Step 4: Timing scoring (task-specific)
         if "timing" in breakdown:
             if task_id == "mac_unit" and synth is not None:
-                dff_count = 0
-                dff_match = re.search(r"\$dff\s+(\d+)", synth.stdout)
-                if dff_match:
-                    dff_count = int(dff_match.group(1))
-                sdff_match = re.findall(r"\$_SDFF", synth.stdout)
-                if sdff_match:
-                    dff_count = len(sdff_match)
+                dff_count = _count_dffs(synth.stdout)
                 if dff_count >= 2:
                     breakdown["timing"] = 0.99
                 elif synth.cell_count >= 10:
@@ -569,17 +574,8 @@ prep -top {props_stem}
                     breakdown["timing"] = 0.20
 
             elif task_id in ("dot_product", "fir_filter"):
-                # Verify pipeline registers exist via DFF count
-                dff_count = 0
-                sdff_match = re.findall(r"\$_SDFF", synth.stdout)
-                dff_match = re.search(r"\$dff\s+(\d+)", synth.stdout)
-                if sdff_match:
-                    dff_count = len(sdff_match)
-                elif dff_match:
-                    dff_count = int(dff_match.group(1))
-                if task_id == "dot_product" and dff_count >= 2:
-                    breakdown["timing"] = 0.99
-                elif task_id == "fir_filter" and dff_count >= 2:
+                dff_count = _count_dffs(synth.stdout)
+                if dff_count >= 2:
                     breakdown["timing"] = 0.99
                 elif synth.cell_count >= 5:
                     breakdown["timing"] = 0.40

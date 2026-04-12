@@ -51,12 +51,12 @@ module tb_dot_product_4;
         clk=0; rst=1; valid_in=0;
         a0=0; a1=0; a2=0; a3=0;
         b0=0; b1=0; b2=0; b3=0;
-        @(posedge clk); @(posedge clk);
-        rst=0; @(posedge clk);
+        @(posedge clk); #1; @(posedge clk); #1;
+        rst=0; @(posedge clk); #1;
 
         // Test 1: [1,1,1,1] · [1,1,1,1] = 4
         valid_in=1; a0=1; a1=1; a2=1; a3=1; b0=1; b1=1; b2=1; b3=1;
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
+        @(posedge clk); #1; valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd4, 1);
 
@@ -66,7 +66,7 @@ module tb_dot_product_4;
 
         // Test 3: [1,2,3,4] · [5,6,7,8] = 5+12+21+32 = 70
         valid_in=1; a0=1; a1=2; a2=3; a3=4; b0=5; b1=6; b2=7; b3=8;
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
+        @(posedge clk); #1; valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd70, 3);
 
@@ -74,7 +74,7 @@ module tb_dot_product_4;
         valid_in=1;
         a0=-8'sd1; a1=-8'sd2; a2=-8'sd3; a3=-8'sd4;
         b0= 8'sd1; b1= 8'sd1; b2= 8'sd1; b3= 8'sd1;
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
+        @(posedge clk); #1; valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(-18'sd10, 4);
 
@@ -82,7 +82,7 @@ module tb_dot_product_4;
         valid_in=1;
         a0=-8'sd1; a1= 8'sd2; a2=-8'sd3; a3= 8'sd4;
         b0= 8'sd1; b1= 8'sd1; b2= 8'sd1; b3= 8'sd1;
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
+        @(posedge clk); #1; valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd2, 5);
 
@@ -90,31 +90,31 @@ module tb_dot_product_4;
         valid_in=1;
         a0=8'sd127; a1=8'sd127; a2=8'sd127; a3=8'sd127;
         b0=8'sd127; b1=8'sd127; b2=8'sd127; b3=8'sd127;
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
+        @(posedge clk); #1; valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd64516, 6);
 
         // Test 7: zero vectors
         valid_in=1; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
-        @(posedge clk); valid_in=0;
+        @(posedge clk); #1; valid_in=0;
         @(posedge clk); #1;
         check_result(18'sd0, 7);
 
         // Test 8+9: back-to-back valid_in — two consecutive inputs, two consecutive outputs
         valid_in=1;
         a0=1; a1=0; a2=0; a3=0; b0=3; b1=0; b2=0; b3=0;  // dot = 3
-        @(posedge clk);
+        @(posedge clk); #1;
         a0=2; a1=0; a2=0; a3=0; b0=4; b1=0; b2=0; b3=0;  // dot = 8
-        @(posedge clk); valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd3, 8);  // first result
+        valid_in=0; a0=0; a1=0; a2=0; a3=0; b0=0; b1=0; b2=0; b3=0;
         @(posedge clk); #1;
         check_result(18'sd8, 9);  // second result
 
         // Test 10: rst clears valid_out
         valid_in=1; a0=5; b0=5; a1=0; b1=0; a2=0; b2=0; a3=0; b3=0;
-        @(posedge clk); rst=1; valid_in=0;
-        @(posedge clk); rst=0; #1;
+        @(posedge clk); #1; rst=1; valid_in=0;
+        @(posedge clk); #1; rst=0; @(posedge clk); #1;
         check_valid_low(10);
 
         $display("SUMMARY: %0d passed, %0d failed", pass_count, fail_count);
