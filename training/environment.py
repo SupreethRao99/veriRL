@@ -51,6 +51,9 @@ def make_env_class(env_url: str):
             self._client = verirl_env(base_url=env_url)
             self.reward: float = 0.0
             self.done: bool = False
+            # Tracked for the evolution buffer in reward_func
+            self.task_id: str = ""
+            self.last_verilog_src: str = ""
 
         def _step(self, action: VerirlAction) -> str:
             """Execute an action, update done/reward if the episode auto-terminates."""
@@ -72,7 +75,9 @@ def make_env_class(env_url: str):
             self._client = verirl_env(base_url=env_url)
             self.reward = 0.0
             self.done = False
-            result = self._client.reset(task_id=task_id or random.choice(ALL_TASKS))
+            self.task_id = task_id or random.choice(ALL_TASKS)
+            self.last_verilog_src = ""
+            result = self._client.reset(task_id=self.task_id)
             return _format_obs(result.observation)
 
         def write_file(self, filename: str, verilog_src: str) -> str:
@@ -85,6 +90,7 @@ def make_env_class(env_url: str):
             Returns:
                 Updated workspace status after the write.
             """
+            self.last_verilog_src = verilog_src  # track for evolution buffer
             return self._step(
                 VerirlAction(
                     action_type="write_file",
