@@ -1,0 +1,106 @@
+# ============================================================
+#  VeriRL — Central Configuration
+#  Loaded via OmegaConf; override any value with environment
+#  variables or command-line merges:
+#    VERIRL_ENV_URL=http://... modal run training/train.py
+# ============================================================
+
+# ------------------------------------------------------------
+# Server
+# ------------------------------------------------------------
+server:
+  host: "0.0.0.0"
+  port: 8000
+  max_concurrent_envs: 10
+
+# ------------------------------------------------------------
+# Inference (inference.py)
+# ------------------------------------------------------------
+inference:
+  api_base_url: "https://router.huggingface.co/v1"
+  model_name: "Qwen/Qwen2.5-72B-Instruct"
+  env_base_url: "http://localhost:8000"
+  success_score_threshold: 0.5
+  benchmark: "verirl"
+
+  # Per-task wall-clock budgets in seconds
+  task_budgets:
+    mac_unit: 240
+    relu_clip: 180
+    barrel_shifter: 180
+    axi_fifo: 360
+    register_file: 300
+    ring_buffer: 360
+    dot_product: 300
+    fir_filter: 360
+    systolic_array: 480
+    fp16_adder: 600
+
+# ------------------------------------------------------------
+# Training
+# ------------------------------------------------------------
+training:
+  # ── Model ──────────────────────────────────────────────────
+  model:
+    base_model: "Qwen/Qwen2.5-Coder-3B-Instruct"
+    hf_output_repo: "SupreethRao99/verirl-rlvr-qwen2.5-coder-3b"
+    use_4bit: true          # QLoRA NF4 quantisation
+
+  # ── GRPO hyper-parameters ──────────────────────────────────
+  grpo:
+    num_train_epochs: 3
+    learning_rate: 5.0e-6
+    per_device_train_batch_size: 1
+    gradient_accumulation_steps: 8
+    num_generations: 6          # G in GRPO — completions sampled per prompt
+    max_prompt_length: 1024
+    max_completion_length: 4096 # total tokens across all turns in one episode
+    temperature: 0.8
+    top_p: 0.95
+    kl_coeff: 0.05              # β — KL penalty coefficient
+    max_steps: 500
+    save_steps: 100
+    logging_steps: 10
+    warmup_ratio: 0.05
+    push_to_hub: true
+
+  # ── LoRA / PEFT ────────────────────────────────────────────
+  lora:
+    r: 64
+    lora_alpha: 128
+    target_modules:
+      - "q_proj"
+      - "k_proj"
+      - "v_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+    lora_dropout: 0.05
+    bias: "none"
+
+  # ── Curriculum — weights need not sum to 1 ─────────────────
+  curriculum:
+    task_difficulty_weights:
+      easy: 0.40    # mac_unit, relu_clip, barrel_shifter
+      medium: 0.40  # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
+      hard: 0.20    # systolic_array, fp16_adder
+
+  # ── Runtime ────────────────────────────────────────────────
+  env_url: "http://localhost:8000"   # overridden by VERIRL_ENV_URL secret on Modal
+  dataset_n_samples: 2000
+
+# ------------------------------------------------------------
+# Modal infra
+# ------------------------------------------------------------
+modal:
+  app_name: "verirl-rlvr"
+  python_version: "3.11"
+  gpu_type: "A100"
+  gpu_count: 1
+  gpu_size: "80GB"
+  timeout: 14400   # 4 hours in seconds
+  memory: 65536    # MB
+  checkpoints_dir: "/checkpoints"
+  checkpoints_volume: "verirl-rlvr-checkpoints"
+  secret_name: "verirl-training"

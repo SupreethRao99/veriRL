@@ -14,12 +14,11 @@ version = "0.4.1"
 description = "Verilog hardware design environment for OpenEnv — trains LLMs to write RTL for AI-accelerator primitives"
 requires-python = ">=3.10"
 dependencies = [
+    "omegaconf>=2.3.0",
     "openai>=2.30.0",
     # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
     "openenv-core[core]>=0.2.2",
     # For loading .env files in inference.py
-    "pytest>=9.0.2",
-    "pytest-cov>=7.1.0",
     "python-dotenv>=1.0.0",
 ]
 
@@ -27,7 +26,26 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.23.0",
     "towncrier>=23.11.0",
+]
+training = [
+    # Core training stack — always installed
+    "torch>=2.3.1",
+    "transformers>=4.57",
+    "trl>=0.28.0",
+    "peft>=0.12.0",
+    "accelerate>=0.33.0",
+    "bitsandbytes>=0.43.3",
+    "wandb>=0.17.0",
+    "huggingface_hub>=0.24.0",
+    "datasets>=3.5.1",
+    "numpy",
+    "omegaconf>=2.3.0",
+    "modal>=1.0.0",
+    # Linux-only: vllm requires CUDA; trl[vllm] pulls in the vllm extras
+    "vllm==0.12.0; sys_platform == 'linux'",
+    "trl[vllm]==0.28.0; sys_platform == 'linux'",
 ]
 
 [project.scripts]
@@ -41,7 +59,7 @@ packages = ["verirl_env", "verirl_env.server"]
 package-dir = { "verirl_env" = ".", "verirl_env.server" = "server" }
 
 [tool.setuptools.package-data]
-verirl_env = ["**/*.yaml", "**/*.yml", "problems/**/*.v", "problems/**/*.md"]
+verirl_env = ["**/*.yaml", "**/*.yml", "problems/**/*.v", "problems/**/*.sv", "problems/**/*.md"]
 
 [tool.towncrier]
 package = "verirl_env"

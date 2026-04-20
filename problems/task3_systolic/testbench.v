@@ -52,12 +52,12 @@ module tb_systolic;
         weights_flat = 0; activations_flat = 0; cycle_counter = 0; done_cycle = 99;
 
         @(posedge clk); @(posedge clk);
-        rst = 0; @(posedge clk);
+        #1; rst = 0; @(posedge clk); #1;
 
         // Test Case 1: Identity weights, all activations = 1
         // Expected: C[i][j] = 1 for all (all-ones 4x4)
         weights_flat = 64'h1111111111111111;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd1;
@@ -65,16 +65,16 @@ module tb_systolic;
         activations_flat[23:16] = 8'd1;
         activations_flat[31:24] = 8'd1;
 
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
 
         begin: wait_loop1
-            repeat(10) begin
-                @(posedge clk);
+            repeat(15) begin
+                @(posedge clk); #1;
                 if (done) disable wait_loop1;
             end
         end
         // Wait one more cycle so the done_cycle non-blocking capture settles
-        @(posedge clk);
+        @(posedge clk); #1;
 
         if (done_cycle <= 7) begin
             $display("PASS: timing — done at cycle %0d (<=7)", done_cycle);
@@ -91,7 +91,7 @@ module tb_systolic;
 
         // Test Case 2: Zero weights
         weights_flat = 64'h0000000000000000;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd255;
@@ -100,8 +100,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd255;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         for (i = 0; i < 16; i = i + 1)
             check16(outputs_flat[i*16 +: 16], 16'd0, 16 + i);
@@ -116,7 +117,7 @@ module tb_systolic;
         weights_flat[43:40] = 4'd5; weights_flat[47:44] = 4'd6;
         weights_flat[51:48] = 4'd4; weights_flat[55:52] = 4'd5;
         weights_flat[59:56] = 4'd6; weights_flat[63:60] = 4'd7;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd1;
@@ -125,8 +126,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd4;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         check16(outputs_flat[0*16 +: 16],  16'd4,  32);
         check16(outputs_flat[1*16 +: 16],  16'd8,  33);
@@ -155,7 +157,7 @@ module tb_systolic;
         weights_flat[43:40] = 4'd4; weights_flat[47:44] = 4'd8;
         weights_flat[51:48] = 4'd1; weights_flat[55:52] = 4'd2;
         weights_flat[59:56] = 4'd4; weights_flat[63:60] = 4'd8;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd10;
@@ -164,8 +166,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd40;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         check16(outputs_flat[0*16 +: 16],  16'd40,  48);
         check16(outputs_flat[1*16 +: 16],  16'd80,  49);
@@ -182,7 +185,7 @@ module tb_systolic;
         weights_flat[43:40] = 4'd0; weights_flat[47:44] = 4'd0;
         weights_flat[51:48] = 4'd5; weights_flat[55:52] = 4'd0;
         weights_flat[59:56] = 4'd0; weights_flat[63:60] = 4'd0;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd2;
@@ -191,8 +194,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd5;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         check16(outputs_flat[0*16 +: 16],  16'd40, 52);
         check16(outputs_flat[4*16 +: 16],  16'd60, 53);
@@ -201,7 +205,7 @@ module tb_systolic;
 
         // Test Case 6: All 8's weights
         weights_flat = 64'h8888888888888888;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd1;
@@ -210,8 +214,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd1;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         for (i = 0; i < 16; i = i + 1)
             check16(outputs_flat[i*16 +: 16], 16'd32, 56 + i);
@@ -220,7 +225,7 @@ module tb_systolic;
         weights_flat = 64'h0;
         weights_flat[3:0]   = 4'd1; weights_flat[23:20] = 4'd2;
         weights_flat[43:40] = 4'd3; weights_flat[63:60] = 4'd4;
-        load_weights = 1; @(posedge clk); load_weights = 0;
+        load_weights = 1; @(posedge clk); #1; load_weights = 0; #1;
 
         activations_flat = 128'd0;
         activations_flat[7:0]   = 8'd10;
@@ -229,8 +234,9 @@ module tb_systolic;
         activations_flat[31:24] = 8'd10;
 
         done_cycle = 99;
-        start = 1; @(posedge clk); start = 0;
+        start = 1; @(posedge clk); #1; start = 0; #1;
         repeat(12) @(posedge clk);
+        #1;
 
         check16(outputs_flat[0*16 +: 16],   16'd40, 72);
         check16(outputs_flat[5*16 +: 16],   16'd80, 73);
