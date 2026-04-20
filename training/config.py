@@ -51,6 +51,11 @@ class TrainConfig:
         "hard":   0.20,   # systolic_array, fp16_adder
     })
 
+    # ── Evolutionary GRPO ─────────────────────────────────────────────────
+    evolution_phase_ratio: float = 0.20    # fraction of max_steps for evolution phase (0 = disabled)
+    evolution_top_k: int = 2               # top-K designs used to build each evolution prompt
+    evolution_score_threshold: float = 0.40  # min episode score to enter the evolution buffer
+
     # ── Runtime ────────────────────────────────────────────────────────────
     env_url: str = "http://localhost:8000"  # overridden by VERIRL_ENV_URL secret
     dataset_n_samples: int = 2000
@@ -111,6 +116,10 @@ class TrainConfig:
             "task_difficulty_weights":       dict(OmegaConf.to_container(
                                                  t.curriculum.task_difficulty_weights
                                              )),
+            # Evolutionary GRPO
+            "evolution_phase_ratio":         float(t.evolution.phase_ratio),
+            "evolution_top_k":               int(t.evolution.top_k),
+            "evolution_score_threshold":     float(t.evolution.score_threshold),
             # Runtime
             "env_url":                       str(t.env_url),
             "dataset_n_samples":             int(t.dataset_n_samples),

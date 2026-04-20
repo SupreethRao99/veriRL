@@ -112,6 +112,36 @@ def train() -> dict:
 
 
 @app.function(**_GPU_KWARGS)
+def train_evolutionary() -> dict:
+    """
+    Two-phase evolutionary GRPO training on a single A100-80GB.
+
+    Phase 1 — Individual GRPO (80% of steps):
+        Standard GRPO on individual task prompts. High-scoring completions
+        are accumulated in the evolution buffer (threshold set in config.yaml).
+
+    Phase 2 — Evolution GRPO (20% of steps):
+        The model receives prompts showing its own top-K previous designs
+        with their EDA scores and must synthesise an improved evolved design.
+        This trains the model to reason about design quality and perform
+        ShinkaEvolve-style genetic improvement in a single forward pass.
+
+    Run with:
+        modal run training/train.py::train_evolutionary
+    """
+    hf_token, wandb_key = setup_auth()
+    config = TrainConfig.from_yaml(
+        env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
+    )
+    grpo_config = build_grpo_config(
+        config, hf_token, wandb_key,
+        output_dir=str(CHECKPOINTS_DIR),
+        run_name="verirl-evolutionary-grpo-qwen2.5-coder-3b",
+    )
+    return run_training(config, grpo_config, hf_token, str(CHECKPOINTS_DIR / "final"))
+
+
+@app.function(**_GPU_KWARGS)
 def train_vllm() -> dict:
     """
     QLoRA GRPO training with vLLM colocate mode for faster generation.
@@ -207,8 +237,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="VeriRL RLVR training")
-    parser.add_argument("--smoke", action="store_true", help="Run smoke test (no GPU)")
-    parser.add_argument("--vllm",  action="store_true", help="Use vLLM colocate mode")
+    parser.add_argument("--smoke",        action="store_true", help="Run smoke test (no GPU)")
+    parser.add_argument("--vllm",         action="store_true", help="Use vLLM colocate mode")
+    parser.add_argument("--evolutionary", action="store_true", help="Two-phase evolutionary GRPO")
     args = parser.parse_args()
 
     with app.run():
@@ -216,5 +247,7 @@ if __name__ == "__main__":
             print(smoke_test.remote())
         elif args.vllm:
             print(train_vllm.remote())
+        elif args.evolutionary:
+            print(train_evolutionary.remote())
         else:
             print(train.remote())
