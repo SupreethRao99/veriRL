@@ -1,3 +1,11 @@
+## [0.5.0] - 2026-04-20
+
+Features
+~~~~~~~~
+
+- Added ShinkaEvolve-style evolutionary GRPO: two-phase training where the model learns to synthesise improved designs from its top-K EDA-scored candidates (evolutionary-grpo)
+- Added 7 new tasks (relu_clip, barrel_shifter, register_file, ring_buffer, dot_product, fir_filter, fp16_adder) bringing the total to 10; added formal verification via SymbiYosys; added multi-file Verilog project support with per-file write_file; added Modal Labs RLVR training script (GRPO + QLoRA on Qwen2.5-Coder-3B) (grand-finale)
+- Added multi-agent inference demo (multi_agent_run.py): Designer + Verifier + Mutator evolutionary pipeline (multi-agent-demo)
 ## [0.4.1] - 2026-04-20
 
 Miscellaneous
