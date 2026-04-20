@@ -35,8 +35,7 @@ class TestMACUnit:
         self, evaluator, mac_reference_verilog, environment, requires_eda_tools
     ):
         task = environment.tasks["mac_unit"]
-        result = evaluator.grade(
-            verilog_src=mac_reference_verilog,
+        result = evaluator.grade(mac_reference_verilog,
             task_id="mac_unit",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -51,8 +50,7 @@ class TestMACUnit:
 
     def test_mac_empty_submission(self, evaluator, environment):
         task = environment.tasks["mac_unit"]
-        result = evaluator.grade(
-            verilog_src="",
+        result = evaluator.grade("",
             task_id="mac_unit",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -63,8 +61,7 @@ class TestMACUnit:
     def test_mac_broken_module(self, evaluator, environment):
         broken = "module mac_unit (input a, output b); endmodule"  # wrong interface
         task = environment.tasks["mac_unit"]
-        result = evaluator.grade(
-            verilog_src=broken,
+        result = evaluator.grade(broken,
             task_id="mac_unit",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -88,8 +85,7 @@ class TestAXIFIFO:
         self, evaluator, axi_reference_verilog, environment, requires_eda_tools
     ):
         task = environment.tasks["axi_fifo"]
-        result = evaluator.grade(
-            verilog_src=axi_reference_verilog,
+        result = evaluator.grade(axi_reference_verilog,
             task_id="axi_fifo",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -113,8 +109,7 @@ class TestSystolicArray:
         self, evaluator, systolic_reference_verilog, environment, requires_eda_tools
     ):
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src=systolic_reference_verilog,
+        result = evaluator.grade(systolic_reference_verilog,
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -131,8 +126,7 @@ class TestSystolicArray:
     ):
         """Timing dimension is captured and scored within [0, 1]."""
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src=systolic_reference_verilog,
+        result = evaluator.grade(systolic_reference_verilog,
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -147,8 +141,7 @@ class TestSystolicArray:
     ):
         """Empty submission must score the minimum clamped value."""
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src="",
+        result = evaluator.grade("",
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -175,8 +168,7 @@ class TestSystolicArray:
         endmodule
         """
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src=broken,
+        result = evaluator.grade(broken,
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -208,8 +200,7 @@ class TestSystolicArray:
         endmodule
         """
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src=broken,
+        result = evaluator.grade(broken,
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,
@@ -238,8 +229,7 @@ class TestSystolicArray:
         endmodule
         """
         task = environment.tasks["systolic_array"]
-        result = evaluator.grade(
-            verilog_src=broken,
+        result = evaluator.grade(broken,
             task_id="systolic_array",
             testbench_path=task.testbench_path,
             reference_cells=task.reference_cells,

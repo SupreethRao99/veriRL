@@ -186,7 +186,7 @@ class TestTaskSelection:
         assert "systolic_array" in tasks
 
     def test_num_tasks(self, environment):
-        assert environment.num_tasks == 3
+        assert environment.num_tasks == 10
 
     def test_invalid_task_id(self, environment):
         with pytest.raises(ValueError):

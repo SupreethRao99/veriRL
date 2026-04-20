@@ -4,52 +4,132 @@ display_name: VeriRL — Verilog RTL Design Environment
 description: >
   An OpenEnv environment for training and evaluating language model agents on
   synthesizable Verilog RTL design. Agents write hardware modules for
-  AI-accelerator primitives (MAC unit, AXI-Stream FIFO, 4×4 systolic array)
-  and receive graded feedback from real EDA tools (iverilog, yosys).
-  Grading is deterministic and tool-based — not heuristic.
+  AI-accelerator primitives spanning the full ML inference stack — from
+  activation functions and arithmetic units to memory structures and
+  systolic arrays — and receive graded feedback from real EDA tools
+  (iverilog, yosys, SymbiYosys). Grading is deterministic and tool-based;
+  not heuristic. Multi-file projects are natively supported.
 type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
 
 tasks:
+  # ── Easy ──────────────────────────────────────────────────────────────
   - id: mac_unit
     name: Pipelined MAC Unit
     difficulty: easy
     max_turns: 8
     description: >
       Design a 2-stage pipelined multiply-accumulate unit for signed 8-bit
-      integers with a 32-bit accumulator. Output is valid 2 clock cycles after
-      inputs are presented.
+      integers with a 32-bit accumulator. Output is valid 2 clock cycles
+      after inputs are presented.
 
+  - id: relu_clip
+    name: Parameterized ReLU-Clip Unit
+    difficulty: easy
+    max_turns: 6
+    description: >
+      Design a fully combinational ReLU activation followed by saturating
+      cast to a narrower unsigned integer — the activation primitive in
+      every quantized neural-network inference pipeline.
+    formal: true
+
+  - id: barrel_shifter
+    name: Parameterized Barrel Shifter
+    difficulty: easy
+    max_turns: 6
+    description: >
+      Design a fully combinational barrel shifter supporting left shift,
+      logical right shift, and arithmetic right shift for any WIDTH.
+
+  # ── Medium ────────────────────────────────────────────────────────────
   - id: axi_fifo
     name: AXI-Stream FIFO
     difficulty: medium
     max_turns: 10
     description: >
-      Implement a 4-entry FIFO with correct AXI4-Stream valid/ready handshaking
-      on both slave and master interfaces, including backpressure and no-drop
-      guarantees under downstream stall.
+      Implement a 4-entry FIFO with correct AXI4-Stream valid/ready
+      handshaking on both slave and master interfaces, including
+      backpressure and no-drop guarantees under downstream stall.
 
+  - id: register_file
+    name: Dual-Read / Single-Write Register File
+    difficulty: medium
+    max_turns: 8
+    description: >
+      Implement a RISC-style register file with two asynchronous read
+      ports, one synchronous write port, and register 0 hardwired to
+      zero.
+    formal: true
+
+  - id: ring_buffer
+    name: Parameterized Ring Buffer
+    difficulty: medium
+    max_turns: 10
+    description: >
+      Implement a power-of-2-depth ring buffer (circular FIFO) with
+      push/pop interface, full/empty flags, and item count — the
+      standard data structure for KV-cache management in inference
+      accelerators.
+
+  - id: dot_product
+    name: Pipelined 4-Element INT8 Dot Product
+    difficulty: medium
+    max_turns: 8
+    description: >
+      Design a 2-stage pipelined unit computing the dot product of two
+      4-element signed INT8 vectors — the innermost operation in
+      attention score and fully-connected layer computation.
+
+  - id: fir_filter
+    name: 3-Tap FIR Filter
+    difficulty: medium
+    max_turns: 10
+    description: >
+      Implement a direct-form I 3-tap FIR filter for signed 8-bit
+      samples with programmable coefficients:
+      y[n] = h0·x[n] + h1·x[n-1] + h2·x[n-2].
+
+  # ── Hard ──────────────────────────────────────────────────────────────
   - id: systolic_array
     name: 4x4 Systolic Array
     difficulty: hard
     max_turns: 12
     description: >
-      Design a weight-stationary 4×4 systolic array computing C = A × B for
-      INT8 activations and INT4 weights. The done signal must assert within
-      7 clock cycles of the start pulse, requiring correct diagonal skewing
-      of activation inputs.
+      Design a weight-stationary 4×4 systolic array computing C = A × B
+      for INT8 activations and INT4 weights. The done signal must assert
+      within 7 clock cycles of the start pulse, requiring correct
+      diagonal skewing of activation inputs.
+
+  - id: fp16_adder
+    name: IEEE 754 FP16 Adder
+    difficulty: hard
+    max_turns: 15
+    description: >
+      Implement a combinational IEEE 754 half-precision (FP16)
+      floating-point adder handling normal numbers, zero, infinity, and
+      NaN propagation — the arithmetic primitive of every GPU tensor core.
+    formal: true
 
 actions:
   - name: write_file
-    description: Submit a complete Verilog module source file
+    description: >
+      Write (or overwrite) a named Verilog source file. Supports multi-file
+      projects — use filename field to specify target (e.g. "pe.v", "top.v").
+      Defaults to "design.v".
   - name: run_compile
-    description: Syntax and elaboration check via iverilog
+    description: Syntax and elaboration check of all files via iverilog
   - name: run_sim
     description: Functional simulation against the task testbench via vvp
   - name: run_synth
     description: Synthesis and cell-count estimation via yosys
+  - name: run_formal
+    description: >
+      Formal verification of key design properties via SymbiYosys (optional;
+      available on tasks with properties.sv — relu_clip, register_file, fp16_adder).
+  - name: list_files
+    description: List all source files currently written to the project
   - name: submit
     description: Grade the current submission and end the episode
 
@@ -57,6 +137,7 @@ reward:
   type: dense
   range: [0.0, 1.0]
   description: >
-    Per-step signal based on compile status, simulation pass rate, and a
-    time-efficiency penalty. Final score is a weighted combination of
-    compile, simulation, timing, and area dimensions evaluated by EDA tools.
+    Per-step signal based on compile status, simulation pass rate, formal
+    verification progress, and a time-efficiency penalty. Final score is a
+    weighted combination of compile, simulation, timing, area, and formal
+    dimensions evaluated by EDA tools.

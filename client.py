@@ -80,6 +80,8 @@ class verirl_env(EnvClient[VerirlAction, VerirlObservation, VerirlState]):
         payload: Dict[str, Any] = {"action_type": action.action_type}
         if action.verilog_src is not None:
             payload["verilog_src"] = action.verilog_src
+        if action.filename is not None:
+            payload["filename"] = action.filename
         if action.message is not None:
             payload["message"] = action.message
         return payload
@@ -97,8 +99,11 @@ class verirl_env(EnvClient[VerirlAction, VerirlObservation, VerirlState]):
             turn_number=obs_data.get("turn_number", 0),
             turns_remaining=obs_data.get("turns_remaining", 0),
             current_verilog=obs_data.get("current_verilog"),
+            current_files=obs_data.get("current_files"),
             final_score=obs_data.get("final_score"),
             score_breakdown=obs_data.get("score_breakdown"),
+            formal_properties_proven=obs_data.get("formal_properties_proven"),
+            formal_properties_total=obs_data.get("formal_properties_total"),
             done=payload.get("done", False),
             reward=payload.get("reward"),
             metadata=obs_data.get("metadata", {}),
