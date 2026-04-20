@@ -1,0 +1,1 @@
+Reconcile version to v0.4.0 — the v0.4.0 tag was published to main before the v0.3.x series began; pyproject.toml and CHANGELOG ordering are corrected to reflect v0.4.0 as the semver floor going forward.
