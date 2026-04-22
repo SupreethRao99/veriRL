@@ -1,3 +1,9 @@
+## [0.6.0] - 2026-04-22
+
+Features
+~~~~~~~~
+
+- Added netlist visualization via `VerilogEvaluator.visualize()` using yosys show + graphviz; environment auto-saves PNG diagrams on submit/eval when `viz_output_dir` is set; graphviz added to Docker image. (netlist-visualization)
 ## [0.5.0] - 2026-04-20
 
 Features
