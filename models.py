@@ -27,8 +27,8 @@ class VerirlAction(Action):
     action_type: str = Field(
         ...,
         description=(
-            "One of: write_file, run_compile, run_sim, run_synth, run_formal, "
-            "list_files, submit"
+            "One of: write_file, run_compile, run_sim, run_synth, "
+            "run_formal, list_files, submit"
         ),
     )
     verilog_src: Optional[str] = Field(

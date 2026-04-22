@@ -214,11 +214,13 @@ class VerirlEnvironment(Environment):
         self,
         problems_dir: Optional[str] = None,
         max_turns: Optional[int] = None,
+        viz_output_dir: Optional[str] = None,
     ):
         self.problems_dir = (
             Path(problems_dir) if problems_dir else self._default_problems_dir()
         )
         self._max_turns_override = max_turns
+        self.viz_output_dir = Path(viz_output_dir) if viz_output_dir else None
         self.evaluator = VerilogEvaluator()
         self.tasks: Dict[str, Task] = self._load_tasks()
 
@@ -464,6 +466,7 @@ class VerirlEnvironment(Environment):
             )
             final_score = eval_result.final_score
             score_breakdown = eval_result.score_breakdown
+            self._save_viz()
 
         reward = self._calculate_step_reward()
         self._total_reward += reward
@@ -509,6 +512,7 @@ class VerirlEnvironment(Environment):
         self._total_reward += reward
         self._state.episode_done = True
         self._sync_state(eval_result.final_score)
+        self._save_viz()
 
         primary = self._files.get("design.v") or (
             next(iter(self._files.values())) if self._files else None
@@ -571,6 +575,19 @@ class VerirlEnvironment(Environment):
         self._state.total_reward = self._total_reward
         self._state.turns_remaining = max(0, self._max_turns - self._turn_number)
         self._state.final_score = final_score
+
+    def _save_viz(self) -> None:
+        """Generate and save a netlist PNG for the current episode's files (silent no-op on failure)."""
+        if not self.viz_output_dir or not self._files or not self._compile_ok:
+            return
+        import base64
+        result = self.evaluator.visualize(self._files)
+        if not result.success or not result.image_b64:
+            return
+        self.viz_output_dir.mkdir(parents=True, exist_ok=True)
+        task_id = self._current_task.id if self._current_task else "unknown"
+        fname = self.viz_output_dir / f"{task_id}_turn{self._turn_number}.png"
+        fname.write_bytes(base64.b64decode(result.image_b64))
 
     @property
     def state(self) -> VerirlState:

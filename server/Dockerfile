@@ -67,6 +67,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         iverilog \
         yosys \
+        graphviz \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the virtual environment from builder
