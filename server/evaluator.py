@@ -19,6 +19,7 @@ Provides:
 - Weighted per-task grading across compile / sim / timing / area / formal
 """
 
+import base64
 import os
 import re
 import shutil
@@ -76,6 +77,15 @@ class FormalResult:
         if self.properties_total == 0:
             return 0.0
         return self.properties_proven / self.properties_total
+
+
+@dataclass
+class VisualizationResult:
+    success: bool
+    stdout: str
+    stderr: str
+    image_b64: Optional[str] = None  # base64-encoded PNG
+    format: str = "png"
 
 
 @dataclass
@@ -378,6 +388,62 @@ class VerilogEvaluator:
                 return SynthesisResult(
                     success=False, stdout="", stderr="ERROR: synthesis timed out",
                     cell_count=0,
+                )
+
+    def visualize(
+        self,
+        source: Union[str, Dict[str, str]],
+        top_module: Optional[str] = None,
+    ) -> "VisualizationResult":
+        """
+        Generate a PNG netlist diagram using yosys show + graphviz dot.
+        Returns base64-encoded PNG on success.
+        Requires graphviz (dot) to be installed alongside yosys.
+        """
+        if not shutil.which("dot"):
+            return VisualizationResult(
+                success=False,
+                stdout="",
+                stderr="ERROR: graphviz 'dot' not found — install graphviz to enable visualization.",
+            )
+
+        files = self._files_to_dict(source)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._write_files_to_dir(files, tmpdir)
+            out_prefix = os.path.join(tmpdir, "netlist")
+            read_cmds = " ".join(f"read_verilog {p};" for p in paths)
+            show_cmd = f"show -format png -prefix {out_prefix}"
+            if top_module:
+                show_cmd += f" {top_module}"
+            synth_script = f"{read_cmds} proc; opt; {show_cmd}"
+            try:
+                result = subprocess.run(
+                    ["yosys", "-p", synth_script],
+                    capture_output=True,
+                    text=True,
+                    timeout=SYNTH_TIMEOUT,
+                )
+                png_path = f"{out_prefix}.png"
+                if os.path.exists(png_path):
+                    with open(png_path, "rb") as f:
+                        img_b64 = base64.b64encode(f.read()).decode()
+                    return VisualizationResult(
+                        success=True,
+                        stdout=result.stdout,
+                        stderr=result.stderr,
+                        image_b64=img_b64,
+                        format="png",
+                    )
+                return VisualizationResult(
+                    success=False,
+                    stdout=result.stdout,
+                    stderr=result.stderr or "ERROR: yosys produced no PNG output",
+                )
+            except subprocess.TimeoutExpired:
+                return VisualizationResult(
+                    success=False,
+                    stdout="",
+                    stderr="ERROR: visualization timed out",
                 )
 
     def formal_verify(
