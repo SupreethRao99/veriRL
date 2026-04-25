@@ -53,12 +53,12 @@ def flush_task_rewards(step: int, *, is_world_process_zero: bool = True) -> Mapp
 
     global _METRICS_DEFINED
     if not _METRICS_DEFINED:
-        wandb.define_metric("train/global_step")
-        wandb.define_metric("reward_by_task/*", step_metric="train/global_step")
-        wandb.define_metric("reward_count_by_task/*", step_metric="train/global_step")
+        wandb.define_metric("verirl/global_step")
+        wandb.define_metric("reward_by_task/*", step_metric="verirl/global_step")
+        wandb.define_metric("reward_count_by_task/*", step_metric="verirl/global_step")
         _METRICS_DEFINED = True
 
-    metrics: dict[str, float] = {"train/global_step": float(step)}
+    metrics: dict[str, float] = {"verirl/global_step": float(step)}
     for task, values in sorted(pending.items()):
         if not values:
             continue
@@ -66,7 +66,10 @@ def flush_task_rewards(step: int, *, is_world_process_zero: bool = True) -> Mapp
         metrics[f"reward_count_by_task/{task}"] = float(len(values))
 
     if len(metrics) > 1:
-        wandb.log(metrics, step=step)
+        # Do not pass W&B's internal `step`; TRL also logs to W&B and may have
+        # advanced it already. `verirl/global_step` is the x-axis for these
+        # task reward plots.
+        wandb.log(metrics)
     return metrics
 
 
