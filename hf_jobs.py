@@ -49,7 +49,8 @@ _SFT_FLAVOR_DEFAULT = "a10g-large"
 _GRPO_FLAVOR_DEFAULT = "a10g-largex2"
 _TIMEOUT_DEFAULT = "8h"
 
-# HF_TOKEN is passed as a secret; local .env values are forwarded via --env-file.
+# Local .env values are forwarded via --env-file when present. If .env is not
+# present, fall back to HF Jobs' token forwarding for HF_TOKEN.
 _SECRETS = ["HF_TOKEN"]
 
 
@@ -76,19 +77,22 @@ def _submit(
     dry_run: bool = False,
 ) -> int:
     args = ["uv", "run", "--flavor", flavor, "--timeout", timeout]
-    for secret in _SECRETS:
-        args += ["--secrets", secret]
-    if os.path.exists(".env"):
+    has_env_file = os.path.exists(".env")
+    if has_env_file:
         args += ["--env-file", ".env"]
+    else:
+        for secret in _SECRETS:
+            args += ["--secrets", secret]
     for k, v in (env or {}).items():
         args += ["--env", f"{k}={v}"]
     args.append(script_url)
 
     print(f"[hf_jobs] script  : {script_url}")
     print(f"[hf_jobs] flavor  : {flavor}   timeout: {timeout}")
-    print("[hf_jobs] secret  : HF_TOKEN=<provided by hf CLI>")
-    if os.path.exists(".env"):
+    if has_env_file:
         print("[hf_jobs] env-file: .env")
+    else:
+        print("[hf_jobs] secret  : HF_TOKEN=<provided by hf CLI>")
     if env:
         for k, v in env.items():
             print(f"[hf_jobs] env     : {k}={v}")
