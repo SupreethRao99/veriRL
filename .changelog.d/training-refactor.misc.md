@@ -1,0 +1,1 @@
+Refactored training stack: top-of-file imports, full docstrings, and extracted shared runtime utilities (vLLM startup, env health check, checkpoint resolution) into training/runtime.py to eliminate duplication between the Modal and HF Jobs adapters.

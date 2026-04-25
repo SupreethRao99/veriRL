@@ -1,4 +1,4 @@
-"""Task curriculum: difficulty buckets, sampling, and system prompt."""
+"""Task curriculum: difficulty buckets, sampling weights, and the system prompt."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import random
 import textwrap
 
 from training.config import TrainConfig
+
 
 TASKS_BY_DIFFICULTY: dict[str, list[str]] = {
     "easy":   ["mac_unit", "relu_clip", "barrel_shifter"],
@@ -40,7 +41,18 @@ SYSTEM_PROMPT: str = textwrap.dedent("""
 
 
 def sample_task(config: TrainConfig, rng: random.Random = random) -> str:
-    """Sample a task ID weighted by difficulty bucket."""
+    """Sample a task ID weighted by difficulty bucket.
+
+    Chooses a difficulty bucket according to ``config.task_difficulty_weights``,
+    then uniformly samples a task from that bucket.
+
+    Args:
+        config: Training config containing the ``task_difficulty_weights`` dict.
+        rng: Random source (defaults to the module-level ``random`` instance).
+
+    Returns:
+        A task ID string such as ``"mac_unit"`` or ``"fp16_adder"``.
+    """
     difficulties = list(config.task_difficulty_weights.keys())
     weights = [config.task_difficulty_weights[d] for d in difficulties]
     chosen = rng.choices(difficulties, weights=weights, k=1)[0]

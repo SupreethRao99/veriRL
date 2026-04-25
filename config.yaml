@@ -72,12 +72,12 @@ training:
     per_device_train_batch_size: 2
     gradient_accumulation_steps: 4
     num_generations: 2          # G in GRPO — completions sampled per prompt
-    max_completion_length: 1024 # per-turn token budget (one action + reasoning)
-    max_model_length: 8192      # total episode context; vLLM gets a dedicated GPU in server mode
+    max_completion_length: 512  # per-turn token budget (one action + reasoning)
+    max_model_length: 4096      # total episode context; enough for the focused ReLU-Clip run
     temperature: 0.8
     top_p: 0.95
     kl_coeff: 0.05              # β — KL penalty coefficient
-    max_steps: 50
+    max_steps: 100
     save_steps: 20
     logging_steps: 1
     warmup_ratio: 0.05
@@ -98,9 +98,9 @@ training:
 
   # ── Curriculum — weights need not sum to 1 ─────────────────
   curriculum:
-    task_ids: ["mac_unit"]  # single easy task for the 50-step reward-shaping smoke run
+    task_ids: ["relu_clip"]  # single easy task for the 100-step reward-shaping run
     task_difficulty_weights:
-      easy: 1.00    # mac_unit only for this smoke run
+      easy: 1.00    # relu_clip only for this focused run
       medium: 0.00
       hard: 0.00
 
@@ -128,6 +128,6 @@ modal:
 hfjobs:
   github_repo: "SupreethRao99/veriRL"
   github_branch: "main"
-  sft_flavor: "a10g-large"      # 1×A10G (24 GB) — Unsloth SFT
-  grpo_flavor: "a10g-largex2"   # 2×A10G: vLLM server mode; swap for a100-large for single-card colocate
+  sft_flavor: "h200"      # 1×H200 (141 GB) — Unsloth SFT
+  grpo_flavor: "a10g-largex2"   # 2×A10G: vLLM server mode; swap for H200-large for single-card colocate
   timeout: "8h"

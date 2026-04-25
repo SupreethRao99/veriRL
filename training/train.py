@@ -1,7 +1,8 @@
-"""
-Local training runner — no Modal dependency.
+"""Local GRPO training runner — no Modal or HF Jobs dependency.
 
-For Modal-based training (remote GPU, volumes, secrets) use modal_infra.py instead.
+For cloud training use ``modal_infra.py`` (Modal Labs) or ``hf_jobs.py``
+(HuggingFace Jobs) instead. This script is intended for local iteration and
+connectivity smoke tests.
 
 Usage
 -----
@@ -13,7 +14,7 @@ Environment
 -----------
   VERIRL_ENV_URL    URL of the running VeriRL environment server
   HF_TOKEN          HuggingFace token (required for model download + hub push)
-  WANDB_API_KEY     (optional) Weights & Biases key
+  WANDB_API_KEY     Weights & Biases key (optional)
 """
 
 from __future__ import annotations
@@ -22,13 +23,22 @@ import argparse
 import os
 import textwrap
 
+from verirl_env import VerirlAction, verirl_env  # type: ignore
+
 from training.config import TrainConfig
-from training.trainer import build_grpo_config, run_training, setup_auth
 
 
 def _smoke_test() -> dict:
-    from verirl_env import VerirlAction, verirl_env  # type: ignore
+    """Run a minimal write→compile→simulate→submit episode against the env server.
 
+    Connects to ``VERIRL_ENV_URL`` (default ``http://localhost:8000``), resets
+    the ``relu_clip`` task, writes a known-good implementation, runs the full
+    tool loop, and returns the final score. Useful for verifying that the
+    environment server is reachable and grading correctly before a training run.
+
+    Returns:
+        A dict with ``status`` and ``relu_clip_score`` keys.
+    """
     env_url = os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
     print(f"[smoke_test] Connecting to {env_url}")
 
@@ -70,14 +80,19 @@ def _smoke_test() -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VeriRL local training runner")
-    parser.add_argument("--smoke", action="store_true", help="Run connectivity smoke test")
-    parser.add_argument("--vllm",  action="store_true", help="Enable vLLM colocate mode")
+    parser.add_argument("--smoke",      action="store_true", help="Run connectivity smoke test")
+    parser.add_argument("--vllm",       action="store_true", help="Enable vLLM colocate mode")
     parser.add_argument("--output-dir", default="./checkpoints", help="Checkpoint output directory")
     args = parser.parse_args()
 
     if args.smoke:
         print(_smoke_test())
     else:
+        # Imported here because training.trainer requires the grpo extra
+        # (torch, transformers ≥ 5, trl ≥ 1, peft). The smoke test above
+        # intentionally avoids those imports so it works without training extras.
+        from training.trainer import build_grpo_config, run_training, setup_auth
+
         hf_token, wandb_key = setup_auth()
         config = TrainConfig.from_yaml(
             env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")

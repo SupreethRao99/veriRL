@@ -1,4 +1,4 @@
-"""Dataset builder for GRPO training."""
+"""Dataset builder for GRPO curriculum training."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datasets import Dataset
 from training.config import TrainConfig
 from training.curriculum import ALL_TASKS, SYSTEM_PROMPT, TASKS_BY_DIFFICULTY
 
-# Map task_id → subdirectory name under problems/
+
 _TASK_DIRS: dict[str, str] = {
     "mac_unit":       "task1_mac",
     "axi_fifo":       "task2_axi_fifo",
@@ -26,7 +26,16 @@ _TASK_DIRS: dict[str, str] = {
 
 
 def _load_specs_from_disk() -> dict[str, str]:
-    """Read spec.md for every task directly from the problems/ directory."""
+    """Read ``spec.md`` for every task from the ``problems/`` directory.
+
+    Tries several candidate locations (installed package path, repository root,
+    parent of repository root) so the function works both when the package is
+    installed as a wheel and when run directly from the cloned repo.
+
+    Returns:
+        A dict mapping ``task_id`` → spec Markdown string. Tasks whose spec
+        file is not found are omitted; callers should supply fallback text.
+    """
     candidates = [
         Path(__file__).parent.parent / "problems",
         Path(__file__).parent.parent.parent / "problems",
@@ -50,20 +59,28 @@ def _load_specs_from_disk() -> dict[str, str]:
 
 
 def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
-    """
-    Build a HuggingFace Dataset of (prompt, task_id) pairs for GRPO.
+    """Build a HuggingFace ``Dataset`` of ``(prompt, task_id)`` pairs for GRPO.
 
     Records are ordered easy → medium → hard so TRL trains on simpler tasks
-    first. GRPOTrainer requires a standard Dataset, so the rows are laid out in
-    curriculum order even though the trainer may still sample from it.
+    first. The ordering is soft — GRPOTrainer may still sample non-sequentially
+    — but it biases the early training steps toward tractable tasks.
 
-    With generation_batch_size=4 and num_generations=2, TRL consumes roughly
-    n_steps * (generation_batch_size / num_generations) / steps_per_generation
-    unique prompts. For max_steps=200 that is ~100 unique prompts, so
-    n_samples=400 gives ~2 passes through the curriculum.
+    With ``num_generations=2`` and ``per_device_train_batch_size=4``, TRL
+    consumes roughly ``max_steps * batch / num_generations`` unique prompts.
+    For ``max_steps=200`` that is ~400 unique prompts, so the default
+    ``n_samples=400`` gives one pass through the curriculum.
 
-    The task_id column is forwarded to VerirlToolEnv.reset() so every sample
-    targets a specific task.
+    The ``task_id`` column is forwarded to ``VerirlToolEnv.reset()`` so every
+    sample targets a specific task rather than sampling randomly at runtime.
+
+    Args:
+        config: Training config supplying ``task_difficulty_weights`` and
+            ``task_ids`` (the allowed task subset).
+        n_samples: Total number of dataset rows to produce.
+
+    Returns:
+        A HuggingFace ``Dataset`` with ``prompt`` (list of chat messages) and
+        ``task_id`` (str) columns.
     """
     rng = random.Random(42)
 
@@ -76,14 +93,13 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
     total_weight = sum(weights.values())
 
     records = []
-    # Build phases in order: easy first, medium next, hard last.
     for difficulty in ["easy", "medium", "hard"]:
         w = weights.get(difficulty, 0.0)
         n = round(n_samples * w / total_weight)
         allowed_tasks = set(config.task_ids) if config.task_ids else None
         tasks = TASKS_BY_DIFFICULTY[difficulty]
         if allowed_tasks is not None:
-            tasks = [task for task in tasks if task in allowed_tasks]
+            tasks = [t for t in tasks if t in allowed_tasks]
         if not tasks:
             continue
         for _ in range(n):
@@ -96,7 +112,6 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
                 "task_id": task_id,
             })
 
-    # Trim or pad to exactly n_samples (pad with easy tasks).
     easy_tasks = config.task_ids or TASKS_BY_DIFFICULTY["easy"]
     while len(records) < n_samples:
         task_id = rng.choice(easy_tasks)

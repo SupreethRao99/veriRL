@@ -16,15 +16,11 @@
 #   "unsloth==2026.4.8; sys_platform == 'linux'",
 # ]
 # ///
-"""
-SFT warm-start training script for HF Jobs.
+"""SFT warm-start training entry point for HuggingFace Jobs.
 
-Clones the VeriRL repo into /tmp/verirl so all training.* imports resolve
-identically to the Modal environment (add_local_dir equivalent).
-
-Environment variables (injected via `hf jobs uv run --secrets`):
-  HF_TOKEN        (required) HuggingFace write token
-  WANDB_API_KEY   (optional) Weights & Biases key
+Environment variables (injected via ``hf jobs uv run --secrets``):
+  HF_TOKEN      (required) HuggingFace write token
+  WANDB_API_KEY (optional) Weights & Biases key
 """
 
 from __future__ import annotations
@@ -32,14 +28,17 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Bootstrap: clone repo → identical to Modal's add_local_dir
+# Bootstrap: clone the repo so all training.* imports resolve correctly.
+# Mirrors Modal's add_local_dir — HF Jobs does not pre-install the project.
 # ---------------------------------------------------------------------------
 
 _REPO = "https://github.com/SupreethRao99/veriRL.git"
 _WORKDIR = "/tmp/verirl_env"
 _GIT_REF = os.environ.get("VERIRL_GIT_REF", "feat/working-grpo")
+_OUTPUT_DIR = f"{_WORKDIR}/checkpoints/sft"
 
 if not os.path.exists(_WORKDIR):
     subprocess.run(
@@ -48,19 +47,18 @@ if not os.path.exists(_WORKDIR):
     )
 
 sys.path.insert(0, _WORKDIR)
-sys.path.insert(0, os.path.dirname(_WORKDIR))
+sys.path.insert(0, str(Path(_WORKDIR).parent))
 os.chdir(_WORKDIR)
+os.makedirs(_OUTPUT_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# Training
+# Training — all imports after bootstrap so the repo is on sys.path.
+# noqa: E402 comments suppress import-order linting for the block below.
 # ---------------------------------------------------------------------------
 
 from training.config import SFTConfig  # noqa: E402
 from training.sft import run_sft  # noqa: E402
 from training.trainer import setup_auth  # noqa: E402
-
-_OUTPUT_DIR = f"{_WORKDIR}/checkpoints/sft"
-os.makedirs(_OUTPUT_DIR, exist_ok=True)
 
 hf_token, wandb_key = setup_auth()
 config = SFTConfig.from_yaml()

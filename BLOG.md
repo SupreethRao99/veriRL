@@ -43,7 +43,7 @@ Training happens in two sequential phases, each building on the last.
 
 Before the model sees any RL signal, we fine-tune it on real Verilog code using supervised learning. This gives the policy a strong prior: it learns what valid, synthesizable Verilog looks like before being asked to reason about correctness under feedback.
 
-**Dataset**: [PyraNet-Verilog](https://huggingface.co/datasets/bnadimi/PyraNet-Verilog) — 692K Verilog samples filtered to ~50K compile-clean examples.
+**Dataset**: [PyraNet-Verilog](https://huggingface.co/datasets/bnadimi/PyraNet-Verilog) — 692K Verilog samples filtered to compile-clean examples.
 
 **Stack**: [Unsloth](https://github.com/unslothai/unsloth) + TRL `SFTTrainer`, QLoRA (rank-16, NF4 4-bit), Qwen3-4B-Thinking-2507.
 
@@ -54,13 +54,16 @@ Output: correct Verilog module
 
 Each training example is formatted as a chat turn with a fixed system prompt establishing the designer persona. Samples with compilation errors are filtered out — the model only imitates working code.
 
-The SFT checkpoint is pushed to HuggingFace Hub (`Supreeth/verirl-sft-qwen3-4b-thinking`) and serves as the starting point for Phase 2.
+The SFT checkpoint is pushed to HuggingFace Hub as both a LoRA adapter
+(`Supreeth/verirl-sft-qwen3-4b-thinking`) and a merged bf16 copy
+(`Supreeth/verirl-sft-qwen3-4b-thinking-merged`). The merged copy is what vLLM
+loads during the GRPO phase — vLLM cannot load PEFT adapter repos directly.
 
 ### Phase 2 — RLVR with GRPO
 
 With a warm-started policy, we switch to reinforcement learning. The model now interacts with the VeriRL environment and receives reward from real EDA tools.
 
-**Stack**: TRL `GRPOTrainer` + vLLM, QLoRA (rank-1, NF4), starting from the SFT checkpoint.
+**Stack**: TRL `GRPOTrainer` + vLLM, QLoRA (rank-1), starting from the merged SFT checkpoint.
 
 ```
 Prompt: task spec
@@ -68,7 +71,7 @@ Model:  write_file → run_compile → run_sim → submit
 Reward: EDA tool score ∈ [0.01, 0.99]
 ```
 
-The reward decomposes across dimensions — compile success, simulation pass rate, synthesis area, timing, and formal verification — giving the model a dense signal even for partially correct designs.
+The reward decomposes across four components — tool-use discipline, compile success, simulation pass rate, and the final weighted EDA score — giving the model a dense signal even for partially correct designs.
 
 **Why rank-1 LoRA for RL?** Policy gradient updates carry roughly 1 bit of signal per episode. A rank-1 adapter has more than enough capacity to absorb this signal without the regularisation problems of higher-rank adapters in RL settings.
 
@@ -82,28 +85,86 @@ The reward decomposes across dimensions — compile success, simulation pass rat
 
 This prevents the model from getting stuck on tasks it cannot yet solve, while ensuring it sees hard tasks often enough to make progress.
 
-**vLLM in server mode** (2-GPU setup): vLLM runs on GPU 1 with a dedicated 22 GB KV cache, while training runs on GPU 0. This lets us use a full 32K context window without the OOM risk of colocating both on one GPU.
+**vLLM GPU strategy** (auto-detected at runtime):
+- **2 GPUs**: vLLM server on GPU 1 with a dedicated 22 GB KV cache; training on GPU 0. Full context window, no OOM risk.
+- **1 GPU**: vLLM colocate mode on a single card. Context capped at 8192 to share VRAM with the training process.
+
+---
+
+## Code Architecture
+
+The training stack is split into a **backend-agnostic core** and thin **infrastructure adapters**:
+
+```
+training/
+├── config.py        # SFTConfig + TrainConfig dataclasses (YAML-backed)
+├── curriculum.py    # Task difficulty buckets + system prompt
+├── dataset.py       # Curriculum dataset builder (easy → medium → hard)
+├── environment.py   # VerirlToolEnv — TRL environment_factory adapter
+├── reward.py        # Four reward functions (tool, compile, sim, final)
+├── runtime.py       # Shared utilities: vLLM startup, env health check,
+│                    # checkpoint resolution — used by both adapters
+├── sft.py           # SFT training loop (Unsloth, backend-agnostic)
+├── trainer.py       # GRPO training loop (TRL + vLLM, backend-agnostic)
+└── wandb_task_logging.py  # Per-task reward buffering for W&B
+```
+
+Infrastructure adapters contain only backend-specific glue:
+
+```
+infra/
+├── hf_jobs.py       # CLI: submit SFT/GRPO jobs to HuggingFace Jobs
+├── modal_env.py     # Modal: deploy VeriRL env server (CPU, persistent)
+├── modal_infra.py   # Modal: sft() + train() functions
+└── modal_merge.py   # Modal: merge SFT LoRA adapter and push merged bf16 to Hub
+training/
+├── hf_train_sft.py  # HF Jobs entry point (bootstraps repo, calls sft.run_sft)
+└── hf_train_grpo.py # HF Jobs entry point (bootstraps repo, calls trainer.run_training)
+```
+
+`training/runtime.py` eliminates the duplication that previously existed between
+the Modal and HF Jobs adapters — both call the same `wait_for_env_server`,
+`start_vllm_server`, `build_vllm_kwargs`, and `resolve_resume_checkpoint` functions.
 
 ---
 
 ## Infrastructure
 
-Training runs on [Modal Labs](https://modal.com) with two separate functions:
+### HuggingFace Jobs (primary)
 
 ```bash
-modal run modal_infra.py::sft    # Phase 1 — H100, ~8h
-modal run modal_infra.py::train  # Phase 2 — 2×L4, ~4h
+export VERIRL_ENV_URL=https://<username>-verirl-env.hf.space
+
+# Phase 1 — SFT warm-start (1×A10G, ~8h)
+python infra/hf_jobs.py sft
+
+# Phase 2 — RLVR GRPO (2×A10G or 1×H200)
+python infra/hf_jobs.py train
+
+# Monitor
+python infra/hf_jobs.py ps
+python infra/hf_jobs.py logs <job-id>
 ```
 
-Checkpoints are written to a persistent Modal volume and pushed to HuggingFace Hub after every save, so preemption restarts automatically resume from the last checkpoint.
+### Modal Labs (alternative)
+
+```bash
+modal run infra/modal_infra.py::sft    # Phase 1 — H100, ~8h
+modal run infra/modal_infra.py::train  # Phase 2 — 2×L4, ~4h
+modal deploy infra/modal_env.py        # Deploy env server (CPU, persistent)
+```
+
+Checkpoints are written locally during the job and pushed to HuggingFace Hub
+after every save step, so preemption restarts automatically resume from the last
+checkpoint via `VERIRL_RESUME_FROM_CHECKPOINT=latest`.
 
 ---
 
 ## Training Results
 
-> *Training runs in progress on Modal Labs using Unsloth SFT (H100) + TRL GRPO + vLLM (2×L4).*
+> *Training runs in progress on HuggingFace Jobs and Modal Labs.*
 >
-> *Results and W&B curves will be added here before the hackathon demo.*
+> *Results and W&B curves will be added here after the training runs complete.*
 
 Expected trajectory:
 - SFT baseline: mean score ~0.40–0.50 across tasks (strong prior from PyraNet-Verilog)
@@ -120,16 +181,17 @@ pip install openenv-verirl_env
 docker run -p 8000:8000 ghcr.io/SupreethRao99/veriRL:latest
 ```
 
-**Run SFT warm-start on Modal:**
+**Run SFT warm-start on HF Jobs:**
 ```bash
-pip install -e ".[training]"
-modal secret create verirl-training HF_TOKEN=hf_xxx WANDB_API_KEY=xxx VERIRL_ENV_URL=https://your-env.modal.run
-modal run modal_infra.py::sft
+pip install -e ".[sft]"
+huggingface-cli login
+python infra/hf_jobs.py sft
 ```
 
-**Run RLVR training on Modal (from SFT checkpoint):**
+**Run RLVR training on HF Jobs (from SFT checkpoint):**
 ```bash
-modal run modal_infra.py::train
+export VERIRL_ENV_URL=https://<username>-verirl-env.hf.space
+python infra/hf_jobs.py train
 ```
 
 **Run locally (smoke test):**
@@ -150,6 +212,6 @@ The result is a model that doesn't just write Verilog. It learns to **reason abo
 
 ---
 
-*Built with [OpenEnv](https://github.com/open-env/openenv-core) · SFT with [Unsloth](https://github.com/unslothai/unsloth) · RLVR with [HF TRL](https://github.com/huggingface/trl) GRPO + vLLM · Evaluated by [iverilog](https://steveicarus.github.io/iverilog/), [yosys](https://yosyshq.net/yosys/), [SymbiYosys](https://symbiyosys.readthedocs.io/) · Trained on [Modal Labs](https://modal.com)*
+*Built with [OpenEnv](https://github.com/open-env/openenv-core) · SFT with [Unsloth](https://github.com/unslothai/unsloth) · RLVR with [HF TRL](https://github.com/huggingface/trl) GRPO + vLLM · Evaluated by [iverilog](https://steveicarus.github.io/iverilog/), [yosys](https://yosyshq.net/yosys/), [SymbiYosys](https://symbiyosys.readthedocs.io/) · Trained on [HuggingFace Jobs](https://huggingface.co/docs/hub/jobs) and [Modal Labs](https://modal.com)*
 
 *GitHub: [SupreethRao99/veriRL](https://github.com/SupreethRao99/veriRL)*

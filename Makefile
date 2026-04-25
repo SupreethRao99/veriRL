@@ -74,7 +74,7 @@ docker-push: ## Push image to GHCR (requires docker login ghcr.io first)
 
 # ── Training (Modal) ────────────────────────────────────────────────────────
 
-train: ## Run standard QLoRA GRPO training on Modal A100-80 GB
+train: ## Run standard QLoRA GRPO training on Modal H100-80 GB
 	modal run training/train.py
 
 train-vllm: ## Run GRPO training with vLLM colocate mode for faster generation

@@ -1,16 +1,15 @@
-"""
-VeriRL HF Jobs — submit SFT warm-start and RLVR (GRPO) training to Hugging Face Jobs.
+"""VeriRL HF Jobs — submit SFT and RLVR (GRPO) training to HuggingFace Jobs.
 
-Analogous to modal_infra.py: all training logic lives in training/ and is
-backend-agnostic. This file is HF Jobs-specific glue only.
+Analogous to ``modal_infra.py``: all training logic lives in ``training/`` and
+is backend-agnostic. This file contains only HF Jobs-specific glue.
 
 The VeriRL environment server must be reachable from HF Jobs compute.
-Point VERIRL_ENV_URL at your deployed HF Space before running `train`.
+Point ``VERIRL_ENV_URL`` at your deployed HF Space before running ``train``.
 
-GPU strategy (set via --flavor):
-  sft:   a10g-large  (1×A10G, 24 GB)      — Unsloth SFT
-  train: a10g-largex2 (2×A10G, 48 GB)    — vLLM server mode (GPU 1) + training (GPU 0)
-         or a100-large (1×A100, 80 GB)    — colocate mode on a single big card
+GPU flavors (set via ``--flavor``):
+  sft:   ``h200``   (1×H200, 141 GB)   — Unsloth SFT
+  train: ``a10g-largex2`` (2×A10G, 48 GB)   — vLLM server mode
+         ``h200-large``   (1×H200, 141 GB)   — colocate mode on a single card
 
 Usage
 -----
@@ -19,12 +18,12 @@ Usage
   python hf_jobs.py ps                         # list running jobs
   python hf_jobs.py logs <job-id>              # tail job logs
   python hf_jobs.py --dry-run sft              # print hf CLI command without submitting
-  python hf_jobs.py train --flavor a100-large  # override hardware
+  python hf_jobs.py train --flavor h200        # override hardware
 
 Prerequisites
 -------------
-  pip install huggingface_hub hf_xet            # or: uv add huggingface_hub
-  huggingface-cli login                          # authenticate
+  pip install huggingface_hub hf_xet
+  huggingface-cli login
   # Register secrets on HF Hub (one-time):
   #   HF_TOKEN      — write-access token
   #   WANDB_API_KEY — W&B key (optional but recommended)
@@ -37,9 +36,6 @@ import os
 import subprocess
 import sys
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 _GITHUB_ORG = "SupreethRao99"
 _GITHUB_REPO = "veriRL"
@@ -49,20 +45,26 @@ _SFT_FLAVOR_DEFAULT = "a10g-large"
 _GRPO_FLAVOR_DEFAULT = "a10g-largex2"
 _TIMEOUT_DEFAULT = "8h"
 
-# Local .env values are forwarded via --env-file when present. HF_TOKEN is
-# passed as an explicit secret value from the local hf auth store.
-_SECRETS = ["HF_TOKEN"]
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def _raw_url(git_ref: str, path: str) -> str:
+    """Build a raw.githubusercontent.com URL for a file at the given git ref.
+
+    Args:
+        git_ref: Branch name or commit SHA.
+        path: Repo-relative file path (e.g. ``"training/hf_train_sft.py"``).
+
+    Returns:
+        Full raw GitHub URL string.
+    """
     return f"https://raw.githubusercontent.com/{_GITHUB_ORG}/{_GITHUB_REPO}/{git_ref}/{path}"
 
 
 def _hf_token_secret_arg() -> str:
-    """Return an explicit HF_TOKEN secret arg without printing the token."""
+    """Read the HF token from env or the hf CLI auth store.
+
+    Returns:
+        A ``"HF_TOKEN=<value>"`` string suitable for passing to ``--secrets``.
+    """
     token = os.environ.get("HF_TOKEN")
     if not token:
         token = subprocess.check_output(["hf", "auth", "token"], text=True).strip()
@@ -70,6 +72,15 @@ def _hf_token_secret_arg() -> str:
 
 
 def _run_hf(*args: str, dry_run: bool = False) -> int:
+    """Run an ``hf jobs`` subcommand, optionally in dry-run mode.
+
+    Args:
+        *args: Arguments to append after ``hf jobs``.
+        dry_run: If ``True``, print the command instead of executing it.
+
+    Returns:
+        The subprocess return code (always 0 in dry-run mode).
+    """
     cmd = ["hf", "jobs", *args]
     if dry_run:
         redacted = [
@@ -88,6 +99,18 @@ def _submit(
     env: dict[str, str] | None = None,
     dry_run: bool = False,
 ) -> int:
+    """Build and execute an ``hf jobs uv run`` submission command.
+
+    Args:
+        script_url: Raw GitHub URL of the script to run on HF Jobs.
+        flavor: HF Jobs hardware flavor (e.g. ``"a10g-largex2"``).
+        timeout: Job timeout string (e.g. ``"8h"``).
+        env: Extra environment variables to pass via ``--env K=V``.
+        dry_run: If ``True``, print the command without submitting.
+
+    Returns:
+        The ``hf`` CLI return code.
+    """
     args = ["uv", "run", "--flavor", flavor, "--timeout", timeout]
     args += ["--secrets", _hf_token_secret_arg()]
     has_env_file = os.path.exists(".env")
@@ -102,17 +125,23 @@ def _submit(
     print("[hf_jobs] secret  : HF_TOKEN=<provided>")
     if has_env_file:
         print("[hf_jobs] env-file: .env")
-    if env:
-        for k, v in env.items():
-            print(f"[hf_jobs] env     : {k}={v}")
+    for k, v in (env or {}).items():
+        print(f"[hf_jobs] env     : {k}={v}")
     return _run_hf(*args, dry_run=dry_run)
 
 
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
-
 def cmd_sft(flavor: str, timeout: str, git_ref: str, dry_run: bool) -> int:
+    """Submit the SFT warm-start job to HF Jobs.
+
+    Args:
+        flavor: HF Jobs hardware flavor.
+        timeout: Job timeout string.
+        git_ref: Git branch or commit SHA to run.
+        dry_run: If ``True``, print without submitting.
+
+    Returns:
+        The ``hf`` CLI return code.
+    """
     return _submit(
         script_url=_raw_url(git_ref, "training/hf_train_sft.py"),
         flavor=flavor,
@@ -129,6 +158,21 @@ def cmd_train(
     resume_from_checkpoint: str | None,
     dry_run: bool,
 ) -> int:
+    """Submit the RLVR GRPO training job to HF Jobs.
+
+    Requires ``VERIRL_ENV_URL`` to be set in the local environment.
+
+    Args:
+        flavor: HF Jobs hardware flavor.
+        timeout: Job timeout string.
+        git_ref: Git branch or commit SHA to run.
+        resume_from_checkpoint: Checkpoint path or ``'latest'`` to resume from,
+            or ``None`` to start fresh.
+        dry_run: If ``True``, print without submitting.
+
+    Returns:
+        The ``hf`` CLI return code, or 1 if ``VERIRL_ENV_URL`` is not set.
+    """
     env_url = os.environ.get("VERIRL_ENV_URL", "").strip()
     if not env_url:
         print(
@@ -151,28 +195,38 @@ def cmd_train(
 
 
 def cmd_ps(dry_run: bool) -> int:
+    """List all running HF Jobs.
+
+    Args:
+        dry_run: If ``True``, print the command without executing.
+
+    Returns:
+        The ``hf`` CLI return code.
+    """
     return _run_hf("ps", dry_run=dry_run)
 
 
 def cmd_logs(job_id: str, dry_run: bool) -> int:
+    """Tail the logs for a specific HF Job.
+
+    Args:
+        job_id: Job ID from ``hf_jobs.py ps``.
+        dry_run: If ``True``, print the command without executing.
+
+    Returns:
+        The ``hf`` CLI return code.
+    """
     return _run_hf("logs", job_id, dry_run=dry_run)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def _parser() -> argparse.ArgumentParser:
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the ``hf_jobs.py`` CLI."""
     p = argparse.ArgumentParser(
-        description="Submit VeriRL training jobs to Hugging Face Jobs",
+        description="Submit VeriRL training jobs to HuggingFace Jobs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the hf CLI command without submitting",
-    )
+    p.add_argument("--dry-run", action="store_true", help="Print the hf CLI command without submitting")
     sub = p.add_subparsers(dest="command", required=True)
 
     sft_p = sub.add_parser("sft", help="SFT warm-start on PyraNet-Verilog")
@@ -180,16 +234,14 @@ def _parser() -> argparse.ArgumentParser:
     sft_p.add_argument("--timeout", default=_TIMEOUT_DEFAULT)
     sft_p.add_argument("--git-ref", default=_BRANCH_DEFAULT, help="Git ref to run on HF Jobs")
 
-    train_p = sub.add_parser(
-        "train", help="RLVR GRPO training (requires VERIRL_ENV_URL env var)"
-    )
+    train_p = sub.add_parser("train", help="RLVR GRPO training (requires VERIRL_ENV_URL)")
     train_p.add_argument("--flavor", default=_GRPO_FLAVOR_DEFAULT, help="HF Jobs hardware flavor")
     train_p.add_argument("--timeout", default=_TIMEOUT_DEFAULT)
     train_p.add_argument("--git-ref", default=_BRANCH_DEFAULT, help="Git ref to run on HF Jobs")
     train_p.add_argument(
         "--resume-from-checkpoint",
         default=None,
-        help="Checkpoint path, `latest`, or Hub subfolder to pass to GRPO resume",
+        help="Checkpoint path, 'latest', or Hub subfolder to resume GRPO from",
     )
 
     sub.add_parser("ps", help="List running HF Jobs")
@@ -201,12 +253,15 @@ def _parser() -> argparse.ArgumentParser:
 
 
 if __name__ == "__main__":
-    args = _parser().parse_args()
+    args = _build_parser().parse_args()
 
     if args.command == "sft":
         sys.exit(cmd_sft(args.flavor, args.timeout, args.git_ref, args.dry_run))
     elif args.command == "train":
-        sys.exit(cmd_train(args.flavor, args.timeout, args.git_ref, args.resume_from_checkpoint, args.dry_run))
+        sys.exit(cmd_train(
+            args.flavor, args.timeout, args.git_ref,
+            args.resume_from_checkpoint, args.dry_run,
+        ))
     elif args.command == "ps":
         sys.exit(cmd_ps(args.dry_run))
     elif args.command == "logs":
