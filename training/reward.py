@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from training.wandb_task_logging import record_task_reward
 
+# Mirrors config.yaml training.grpo.reward_weights — [tool, compile, sim, final]
+_REWARD_WEIGHTS = (0.05, 0.25, 0.40, 0.30)
+
 
 _ZERO_COMPONENTS: dict[str, float] = {
     "tool": 0.0,
@@ -76,15 +79,23 @@ def _component_reward(environments, key: str, *, clear: bool = False) -> list[fl
     for env in environments:
         components = _components_for_env(env)
         r = float(components.get(key, 0.0))
-        if key == "final":
-            record_task_reward(env.task_id, r)
         queue_remaining = len(getattr(env, "_reward_component_queue", []))
         print(
             f"[reward/{key}] task={env.task_id} score={r:.3f} "
             f"queue_remaining={queue_remaining} env_id={id(env)}"
         )
-        if clear and hasattr(env, "_current_reward_components"):
-            delattr(env, "_current_reward_components")
+        if clear:
+            # Last reward function — log the weighted composite to W&B and reset.
+            w_tool, w_compile, w_sim, w_final = _REWARD_WEIGHTS
+            composite = (
+                w_tool    * float(components.get("tool",    0.0))
+                + w_compile * float(components.get("compile", 0.0))
+                + w_sim     * float(components.get("sim",     0.0))
+                + w_final   * float(components.get("final",   0.0))
+            )
+            record_task_reward(env.task_id, composite)
+            if hasattr(env, "_current_reward_components"):
+                delattr(env, "_current_reward_components")
         rewards.append(r)
     return rewards
 
