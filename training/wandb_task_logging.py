@@ -116,10 +116,8 @@ def flush_task_rewards(
         wandb.define_metric("verirl/global_step")
         wandb.define_metric("reward_by_task/*", step_metric="verirl/global_step")
         wandb.define_metric("reward_count_by_task/*", step_metric="verirl/global_step")
-        for key in _COMPONENT_KEYS:
-            wandb.define_metric(
-                f"reward_components/*/{key}", step_metric="verirl/global_step"
-            )
+        # reward_components/<task>/<key> — trailing glob covers all nested keys
+        wandb.define_metric("reward_components/*", step_metric="verirl/global_step")
         _METRICS_DEFINED = True
 
     metrics: dict[str, float] = {"verirl/global_step": float(step)}
