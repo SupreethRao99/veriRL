@@ -80,7 +80,12 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
     for difficulty in ["easy", "medium", "hard"]:
         w = weights.get(difficulty, 0.0)
         n = round(n_samples * w / total_weight)
+        allowed_tasks = set(config.task_ids) if config.task_ids else None
         tasks = TASKS_BY_DIFFICULTY[difficulty]
+        if allowed_tasks is not None:
+            tasks = [task for task in tasks if task in allowed_tasks]
+        if not tasks:
+            continue
         for _ in range(n):
             task_id = rng.choice(tasks)
             records.append({
@@ -92,7 +97,7 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
             })
 
     # Trim or pad to exactly n_samples (pad with easy tasks).
-    easy_tasks = TASKS_BY_DIFFICULTY["easy"]
+    easy_tasks = config.task_ids or TASKS_BY_DIFFICULTY["easy"]
     while len(records) < n_samples:
         task_id = rng.choice(easy_tasks)
         records.insert(0, {

@@ -94,6 +94,7 @@ def build_grpo_config(
         save_total_limit=3,
         hub_strategy="checkpoint",
         logging_steps=1,
+        reward_weights=config.reward_weights,
         push_to_hub=config.push_to_hub,
         hub_model_id=config.hf_output_repo,
         hub_token=hf_token,
@@ -122,7 +123,12 @@ def run_training(
     from training.curriculum import ALL_TASKS
     from training.dataset import build_dataset
     from training.environment import make_env_class
-    from training.reward import reward_func
+    from training.reward import (
+        compile_reward,
+        final_score_reward,
+        sim_reward,
+        tool_use_reward,
+    )
 
     class WandbTaskRewardCallback(TrainerCallback):
         """Flush per-task reward means at the trainer's global step."""
@@ -140,6 +146,7 @@ def run_training(
     print(f"[VeriRL] env_url     = {config.env_url}")
     print(f"[VeriRL] output_repo = {config.hf_output_repo}")
     print(f"[VeriRL] tasks       = {ALL_TASKS}")
+    print(f"[VeriRL] reward_weights = {config.reward_weights}")
 
     dataset = build_dataset(config, n_samples=config.dataset_n_samples)
     print(f"[VeriRL] Dataset: {config.dataset_n_samples} curriculum samples across {len(ALL_TASKS)} tasks")
@@ -158,7 +165,12 @@ def run_training(
 
     trainer = GRPOTrainer(
         model=model,
-        reward_funcs=[reward_func],
+        reward_funcs=[
+            tool_use_reward,
+            compile_reward,
+            sim_reward,
+            final_score_reward,
+        ],
         args=grpo_config,
         train_dataset=dataset,
         processing_class=tokenizer,

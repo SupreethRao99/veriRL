@@ -78,6 +78,7 @@ class TrainConfig:
     logging_steps: int = 1
     warmup_ratio: float = 0.05
     push_to_hub: bool = True
+    reward_weights: list[float] = field(default_factory=lambda: [0.05, 0.25, 0.40, 0.30])
 
     # ── LoRA / PEFT ────────────────────────────────────────────────────────
     lora_r: int = 1
@@ -88,10 +89,11 @@ class TrainConfig:
 
     # ── Curriculum ────────────────────────────────────────────────────────
     task_difficulty_weights: dict = field(default_factory=lambda: {
-        "easy":   0.90,
-        "medium": 0.10,
-        "hard":   0.00,
+        "easy":   1.0,
+        "medium": 0.0,
+        "hard":   0.0,
     })
+    task_ids: list[str] = field(default_factory=lambda: ["mac_unit"])
 
     # ── Runtime ────────────────────────────────────────────────────────────
     env_url: str = "http://localhost:8000"
@@ -124,6 +126,7 @@ class TrainConfig:
             "logging_steps":                 int(t.grpo.logging_steps),
             "warmup_ratio":                  float(t.grpo.warmup_ratio),
             "push_to_hub":                   bool(t.grpo.push_to_hub),
+            "reward_weights":                list(t.grpo.reward_weights),
             "lora_r":                        int(t.lora.r),
             "lora_alpha":                    int(t.lora.lora_alpha),
             "lora_target_modules":           str(t.lora.target_modules) if isinstance(
@@ -133,6 +136,7 @@ class TrainConfig:
             "lora_bias":                     str(t.lora.bias),
             "task_difficulty_weights":       dict(OmegaConf.to_container(
                                                  t.curriculum.task_difficulty_weights)),
+            "task_ids":                      list(OmegaConf.to_container(t.curriculum.task_ids)),
             "env_url":                       str(t.env_url),
             "dataset_n_samples":             int(t.dataset_n_samples),
         }

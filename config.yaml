@@ -82,6 +82,8 @@ training:
     logging_steps: 1
     warmup_ratio: 0.05
     push_to_hub: true
+    # Reward weights align with: tool_use, compile, sim_tests, final_score
+    reward_weights: [0.05, 0.25, 0.40, 0.30]
 
   # ── LoRA / PEFT ────────────────────────────────────────────
   # Rank-1 suffices for RL (policy gradient ~1 bit/episode << rank-1 capacity).
@@ -96,10 +98,11 @@ training:
 
   # ── Curriculum — weights need not sum to 1 ─────────────────
   curriculum:
+    task_ids: ["mac_unit"]  # single easy task for the 50-step reward-shaping smoke run
     task_difficulty_weights:
-      easy: 0.90    # mac_unit, relu_clip, barrel_shifter  — phase 1: master easy tasks
-      medium: 0.10  # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
-      hard: 0.00    # systolic_array, fp16_adder  — add back after easy reward improves
+      easy: 1.00    # mac_unit only for this smoke run
+      medium: 0.00
+      hard: 0.00
 
   # ── Runtime ────────────────────────────────────────────────
   env_url: "http://localhost:8000"   # overridden by VERIRL_ENV_URL secret on Modal
