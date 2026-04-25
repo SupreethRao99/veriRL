@@ -9,6 +9,7 @@
 #   "bitsandbytes>=0.43.3",
 #   "wandb>=0.17.0",
 #   "huggingface_hub>=0.24.0",
+#   "openenv-core[core]>=0.2.2",
 #   "datasets>=3.5.1",
 #   "numpy",
 #   "omegaconf>=2.3.0",
