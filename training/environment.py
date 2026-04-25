@@ -145,6 +145,10 @@ def make_env_class(env_url: str):
             self.task_id: str = ""
             self.last_verilog_src: str = ""
             self._tool_calls: int = 0
+            # Latest observation state — updated after every step for partial rewards
+            self._compile_ok: bool = False
+            self._tests_passed: int = 0
+            self._tests_total: int = 0
 
         def _enqueue_rewards(self, components: dict[str, float]) -> float:
             """Push terminal reward components onto the queue and mark the episode done.
@@ -190,6 +194,10 @@ def make_env_class(env_url: str):
             self._tool_calls += 1
             result = self._run(self._client.step(action))
             obs = result.observation
+            # Always track latest state so partial_reward_components() is accurate
+            self._compile_ok = bool(getattr(obs, "compile_ok", False))
+            self._tests_passed = int(getattr(obs, "tests_passed", 0) or 0)
+            self._tests_total = int(getattr(obs, "tests_total", 0) or 0)
             if obs.done and not self.done:
                 components = _reward_components(
                     obs,
@@ -228,8 +236,35 @@ def make_env_class(env_url: str):
             self.task_id = task_id or random.choice(ALL_TASKS)
             self.last_verilog_src = ""
             self._tool_calls = 0
+            self._compile_ok = False
+            self._tests_passed = 0
+            self._tests_total = 0
             result = self._run(self._client.reset(task_id=self.task_id))
             return _format_obs(result.observation)
+
+        def partial_reward_components(self) -> dict[str, float]:
+            """Shaped reward from the latest obs state for non-terminal episodes.
+
+            Called by ``reward.py`` when no completed-episode entry is in the
+            queue. Gives the model a learning signal even when it ran out of
+            turns without calling submit, or when TRL samples rewards mid-episode.
+
+            Returns:
+                Dict with ``"tool"``, ``"compile"``, ``"sim"``, ``"final"`` keys.
+            """
+            sim = (
+                self._tests_passed / self._tests_total
+                if self._tests_total > 0
+                else 0.0
+            )
+            # No submit → tool credit capped at 0.5; scale by how many tools used
+            tool = min(0.5, self._tool_calls / 6.0)
+            return {
+                "tool":    float(tool),
+                "compile": 1.0 if self._compile_ok else 0.0,
+                "sim":     float(max(0.0, min(1.0, sim))),
+                "final":   0.01,  # minimum — no submit grade yet
+            }
 
         def write_file(self, filename: str, verilog_src: str) -> str:
             """Write a Verilog source file to the design workspace.

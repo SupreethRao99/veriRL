@@ -41,6 +41,17 @@ def _components_for_env(env) -> dict[str, float]:
         return cached
     if getattr(env, "_reward_component_queue", None):
         components = env._reward_component_queue.popleft()
+    elif hasattr(env, "partial_reward_components"):
+        # Episode did not terminate before TRL sampled rewards — use latest obs
+        # state rather than returning all-zeros, which kills the learning signal.
+        components = env.partial_reward_components()
+        print(
+            f"[reward/partial] task={getattr(env, 'task_id', '?')} "
+            f"tool_calls={getattr(env, '_tool_calls', 0)} "
+            f"compile={getattr(env, '_compile_ok', False)} "
+            f"sim={getattr(env, '_tests_passed', 0)}/{getattr(env, '_tests_total', 0)} "
+            f"components={components}"
+        )
     else:
         components = dict(_ZERO_COMPONENTS)
     env._current_reward_components = components
