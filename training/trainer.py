@@ -142,7 +142,7 @@ def run_training(
     print(f"[VeriRL] tasks       = {ALL_TASKS}")
 
     dataset = build_dataset(config, n_samples=config.dataset_n_samples)
-    print(f"[VeriRL] Dataset: {len(dataset)} samples across {len(ALL_TASKS)} tasks")
+    print(f"[VeriRL] Dataset: {config.dataset_n_samples} curriculum samples across {len(ALL_TASKS)} tasks")
 
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",

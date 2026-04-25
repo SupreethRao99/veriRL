@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from datasets import Dataset
+from datasets import IterableDataset
 
 from training.config import TrainConfig
 from training.curriculum import ALL_TASKS, SYSTEM_PROMPT, TASKS_BY_DIFFICULTY
@@ -49,7 +49,7 @@ def _load_specs_from_disk() -> dict[str, str]:
     return specs
 
 
-def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
+def build_dataset(config: TrainConfig, n_samples: int = 400) -> IterableDataset:
     """
     Build a HuggingFace Dataset of (prompt, task_id) pairs for GRPO.
 
@@ -104,4 +104,4 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
         })
     records = records[:n_samples]
 
-    return Dataset.from_list(records)
+    return IterableDataset.from_generator(lambda: iter(records))

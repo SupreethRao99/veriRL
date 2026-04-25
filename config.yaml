@@ -11,7 +11,7 @@
 server:
   host: "0.0.0.0"
   port: 8000
-  max_concurrent_envs: 16   # per_device_batch_size(1) × grad_accum(4) × num_generations(2) = 8; doubled for headroom
+  max_concurrent_envs: 32   # per_device_batch_size(2) × grad_accum(4) × num_generations(2) = 16; doubled for headroom
 
 # ------------------------------------------------------------
 # Inference (inference.py)
@@ -69,15 +69,15 @@ training:
   grpo:
     num_train_epochs: 3
     learning_rate: 5.0e-5          # 10× the typical full fine-tuning LR (LoRA without Regret)
-    per_device_train_batch_size: 1
+    per_device_train_batch_size: 2
     gradient_accumulation_steps: 4
     num_generations: 2          # G in GRPO — completions sampled per prompt
-    max_completion_length: 2048 # per-turn token budget (one action + reasoning)
-    max_model_length: 16384     # total episode context; vLLM gets a dedicated GPU in server mode
+    max_completion_length: 1024 # per-turn token budget (one action + reasoning)
+    max_model_length: 8192      # total episode context; vLLM gets a dedicated GPU in server mode
     temperature: 0.8
     top_p: 0.95
     kl_coeff: 0.05              # β — KL penalty coefficient
-    max_steps: 200
+    max_steps: 50
     save_steps: 20
     logging_steps: 1
     warmup_ratio: 0.05

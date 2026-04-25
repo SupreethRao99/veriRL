@@ -65,15 +65,15 @@ class TrainConfig:
     # ── GRPO hyper-parameters ──────────────────────────────────────────────
     num_train_epochs: int = 3
     learning_rate: float = 5e-5
-    per_device_train_batch_size: int = 1
+    per_device_train_batch_size: int = 2
     gradient_accumulation_steps: int = 8
     num_generations: int = 4
-    max_completion_length: int = 4096
-    max_model_length: int = 32768
+    max_completion_length: int = 1024
+    max_model_length: int = 8192
     temperature: float = 0.8
     top_p: float = 0.95
     kl_coeff: float = 0.05
-    max_steps: int = 500
+    max_steps: int = 50
     save_steps: int = 20
     logging_steps: int = 1
     warmup_ratio: float = 0.05
