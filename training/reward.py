@@ -11,7 +11,7 @@ The four functions correspond to the four entries in ``config.reward_weights``:
 
 from __future__ import annotations
 
-from training.wandb_task_logging import record_task_reward
+from training.wandb_task_logging import record_task_components
 
 # Mirrors config.yaml training.grpo.reward_weights — [tool, compile, sim, final]
 _REWARD_WEIGHTS = (0.05, 0.25, 0.40, 0.30)
@@ -85,7 +85,8 @@ def _component_reward(environments, key: str, *, clear: bool = False) -> list[fl
             f"queue_remaining={queue_remaining} env_id={id(env)}"
         )
         if clear:
-            # Last reward function — log the weighted composite to W&B and reset.
+            # Last reward function — log all components + weighted composite to
+            # W&B, then reset the cache for the next episode.
             w_tool, w_compile, w_sim, w_final = _REWARD_WEIGHTS
             composite = (
                 w_tool    * float(components.get("tool",    0.0))
@@ -93,7 +94,7 @@ def _component_reward(environments, key: str, *, clear: bool = False) -> list[fl
                 + w_sim     * float(components.get("sim",     0.0))
                 + w_final   * float(components.get("final",   0.0))
             )
-            record_task_reward(env.task_id, composite)
+            record_task_components(env.task_id, components, composite)
             if hasattr(env, "_current_reward_components"):
                 delattr(env, "_current_reward_components")
         rewards.append(r)

@@ -15,23 +15,54 @@ from collections.abc import Mapping
 
 
 _LOCK = threading.Lock()
+# Weighted composite per task: task_id → [composite, ...]
 _PENDING: dict[str, list[float]] = collections.defaultdict(list)
+# Individual components per task: task_id → component_name → [value, ...]
+_PENDING_COMPONENTS: dict[str, dict[str, list[float]]] = collections.defaultdict(
+    lambda: collections.defaultdict(list)
+)
 _METRICS_DEFINED = False
+
+_COMPONENT_KEYS = ("tool", "compile", "sim", "final")
 
 
 def record_task_reward(task_id: str | None, reward: float) -> None:
-    """Buffer one completed episode reward for later trainer-step logging.
+    """Buffer one weighted-composite episode reward for later trainer-step logging.
 
     Thread-safe; may be called concurrently from multiple reward functions.
 
     Args:
         task_id: The task that just finished (e.g. ``"mac_unit"``).
             ``None`` or empty string is normalised to ``"unknown"``.
-        reward: Final score for the episode, in [0.01, 0.99].
+        reward: Weighted composite score for the episode.
     """
     task = (task_id or "unknown").strip() or "unknown"
     with _LOCK:
         _PENDING[task].append(float(reward))
+
+
+def record_task_components(
+    task_id: str | None,
+    components: dict[str, float],
+    composite: float,
+) -> None:
+    """Buffer all reward components + composite for later trainer-step logging.
+
+    Logs ``reward_by_task/<task>`` (composite) and
+    ``reward_components/<task>/<component>`` for each of tool/compile/sim/final.
+
+    Thread-safe; may be called concurrently from multiple reward functions.
+
+    Args:
+        task_id: The task that just finished (e.g. ``"relu_clip"``).
+        components: Dict with ``"tool"``, ``"compile"``, ``"sim"``, ``"final"`` values.
+        composite: Weighted sum of components (what GRPO optimises).
+    """
+    task = (task_id or "unknown").strip() or "unknown"
+    with _LOCK:
+        _PENDING[task].append(float(composite))
+        for key in _COMPONENT_KEYS:
+            _PENDING_COMPONENTS[task][key].append(float(components.get(key, 0.0)))
 
 
 def _is_wandb_ready() -> bool:
@@ -68,7 +99,12 @@ def flush_task_rewards(
         if not _PENDING:
             return {}
         pending = {task: values[:] for task, values in _PENDING.items()}
+        pending_components = {
+            task: {k: v[:] for k, v in comp.items()}
+            for task, comp in _PENDING_COMPONENTS.items()
+        }
         _PENDING.clear()
+        _PENDING_COMPONENTS.clear()
 
     if not _is_wandb_ready():
         return {}
@@ -80,6 +116,10 @@ def flush_task_rewards(
         wandb.define_metric("verirl/global_step")
         wandb.define_metric("reward_by_task/*", step_metric="verirl/global_step")
         wandb.define_metric("reward_count_by_task/*", step_metric="verirl/global_step")
+        for key in _COMPONENT_KEYS:
+            wandb.define_metric(
+                f"reward_components/*/{key}", step_metric="verirl/global_step"
+            )
         _METRICS_DEFINED = True
 
     metrics: dict[str, float] = {"verirl/global_step": float(step)}
@@ -88,6 +128,12 @@ def flush_task_rewards(
             continue
         metrics[f"reward_by_task/{task}"] = sum(values) / len(values)
         metrics[f"reward_count_by_task/{task}"] = float(len(values))
+        # Per-component means for this task
+        comp_data = pending_components.get(task, {})
+        for key in _COMPONENT_KEYS:
+            vals = comp_data.get(key, [])
+            if vals:
+                metrics[f"reward_components/{task}/{key}"] = sum(vals) / len(vals)
 
     if len(metrics) > 1:
         # Do not pass W&B's internal ``step`` argument — TRL may have already
