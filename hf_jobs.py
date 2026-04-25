@@ -49,14 +49,13 @@ _SFT_FLAVOR_DEFAULT = "a10g-large"
 _GRPO_FLAVOR_DEFAULT = "a10g-largex2"
 _TIMEOUT_DEFAULT = "8h"
 
-# Secrets must be pre-registered at huggingface.co/settings/tokens / secrets
-_SECRETS = ["HF_TOKEN", "WANDB_API_KEY"]
+# HF_TOKEN is passed as a secret; local .env values are forwarded via --env-file.
+_SECRETS = ["HF_TOKEN"]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 def _raw_url(git_ref: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{_GITHUB_ORG}/{_GITHUB_REPO}/{git_ref}/{path}"
 
@@ -79,12 +78,17 @@ def _submit(
     args = ["uv", "run", "--flavor", flavor, "--timeout", timeout]
     for secret in _SECRETS:
         args += ["--secrets", secret]
+    if os.path.exists(".env"):
+        args += ["--env-file", ".env"]
     for k, v in (env or {}).items():
         args += ["--env", f"{k}={v}"]
     args.append(script_url)
 
     print(f"[hf_jobs] script  : {script_url}")
     print(f"[hf_jobs] flavor  : {flavor}   timeout: {timeout}")
+    print("[hf_jobs] secret  : HF_TOKEN=<provided by hf CLI>")
+    if os.path.exists(".env"):
+        print("[hf_jobs] env-file: .env")
     if env:
         for k, v in env.items():
             print(f"[hf_jobs] env     : {k}={v}")
