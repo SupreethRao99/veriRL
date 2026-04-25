@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "torch>=2.3.1",
-#   "transformers>=4.57.0",
+#   "transformers>=5.2.0",
 #   "trl>=1.0.0",
 #   "peft>=0.12.0",
 #   "accelerate>=0.33.0",
