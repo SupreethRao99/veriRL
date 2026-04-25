@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from datasets import IterableDataset
+from datasets import Dataset
 
 from training.config import TrainConfig
 from training.curriculum import ALL_TASKS, SYSTEM_PROMPT, TASKS_BY_DIFFICULTY
@@ -49,13 +49,13 @@ def _load_specs_from_disk() -> dict[str, str]:
     return specs
 
 
-def build_dataset(config: TrainConfig, n_samples: int = 400) -> IterableDataset:
+def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
     """
     Build a HuggingFace Dataset of (prompt, task_id) pairs for GRPO.
 
     Records are ordered easy → medium → hard so TRL trains on simpler tasks
-    first. The dataset is returned as an IterableDataset to prevent the
-    Trainer's DataLoader from shuffling the curriculum order.
+    first. GRPOTrainer requires a standard Dataset, so the rows are laid out in
+    curriculum order even though the trainer may still sample from it.
 
     With generation_batch_size=4 and num_generations=2, TRL consumes roughly
     n_steps * (generation_batch_size / num_generations) / steps_per_generation
@@ -104,4 +104,4 @@ def build_dataset(config: TrainConfig, n_samples: int = 400) -> IterableDataset:
         })
     records = records[:n_samples]
 
-    return IterableDataset.from_generator(lambda: iter(records))
+    return Dataset.from_list(records)

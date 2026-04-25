@@ -97,9 +97,9 @@ training:
   # ── Curriculum — weights need not sum to 1 ─────────────────
   curriculum:
     task_difficulty_weights:
-      easy: 0.75    # mac_unit, relu_clip, barrel_shifter  — phase 1: master easy tasks
-      medium: 0.20  # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
-      hard: 0.05    # systolic_array, fp16_adder  — rare until model is ready
+      easy: 0.90    # mac_unit, relu_clip, barrel_shifter  — phase 1: master easy tasks
+      medium: 0.10  # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
+      hard: 0.00    # systolic_array, fp16_adder  — add back after easy reward improves
 
   # ── Runtime ────────────────────────────────────────────────
   env_url: "http://localhost:8000"   # overridden by VERIRL_ENV_URL secret on Modal

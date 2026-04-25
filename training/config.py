@@ -88,9 +88,9 @@ class TrainConfig:
 
     # ── Curriculum ────────────────────────────────────────────────────────
     task_difficulty_weights: dict = field(default_factory=lambda: {
-        "easy":   0.40,
-        "medium": 0.40,
-        "hard":   0.20,
+        "easy":   0.90,
+        "medium": 0.10,
+        "hard":   0.00,
     })
 
     # ── Runtime ────────────────────────────────────────────────────────────
