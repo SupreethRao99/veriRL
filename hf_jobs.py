@@ -49,8 +49,8 @@ _SFT_FLAVOR_DEFAULT = "a10g-large"
 _GRPO_FLAVOR_DEFAULT = "a10g-largex2"
 _TIMEOUT_DEFAULT = "8h"
 
-# Local .env values are forwarded via --env-file when present. If .env is not
-# present, fall back to HF Jobs' token forwarding for HF_TOKEN.
+# Local .env values are forwarded via --env-file when present. HF_TOKEN is
+# passed as an explicit secret value from the local hf auth store.
 _SECRETS = ["HF_TOKEN"]
 
 
@@ -61,10 +61,22 @@ def _raw_url(git_ref: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{_GITHUB_ORG}/{_GITHUB_REPO}/{git_ref}/{path}"
 
 
+def _hf_token_secret_arg() -> str:
+    """Return an explicit HF_TOKEN secret arg without printing the token."""
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        token = subprocess.check_output(["hf", "auth", "token"], text=True).strip()
+    return f"HF_TOKEN={token}"
+
+
 def _run_hf(*args: str, dry_run: bool = False) -> int:
     cmd = ["hf", "jobs", *args]
     if dry_run:
-        print("[dry-run]", " ".join(cmd))
+        redacted = [
+            "HF_TOKEN=<redacted>" if arg.startswith("HF_TOKEN=") else arg
+            for arg in cmd
+        ]
+        print("[dry-run]", " ".join(redacted))
         return 0
     return subprocess.run(cmd).returncode
 
@@ -77,22 +89,19 @@ def _submit(
     dry_run: bool = False,
 ) -> int:
     args = ["uv", "run", "--flavor", flavor, "--timeout", timeout]
+    args += ["--secrets", _hf_token_secret_arg()]
     has_env_file = os.path.exists(".env")
     if has_env_file:
         args += ["--env-file", ".env"]
-    else:
-        for secret in _SECRETS:
-            args += ["--secrets", secret]
     for k, v in (env or {}).items():
         args += ["--env", f"{k}={v}"]
     args.append(script_url)
 
     print(f"[hf_jobs] script  : {script_url}")
     print(f"[hf_jobs] flavor  : {flavor}   timeout: {timeout}")
+    print("[hf_jobs] secret  : HF_TOKEN=<provided>")
     if has_env_file:
         print("[hf_jobs] env-file: .env")
-    else:
-        print("[hf_jobs] secret  : HF_TOKEN=<provided by hf CLI>")
     if env:
         for k, v in env.items():
             print(f"[hf_jobs] env     : {k}={v}")
