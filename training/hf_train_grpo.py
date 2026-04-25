@@ -38,6 +38,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Bootstrap: clone repo → identical to Modal's add_local_dir
@@ -45,10 +46,11 @@ import time
 
 _REPO = "https://github.com/SupreethRao99/veriRL.git"
 _WORKDIR = "/tmp/verirl"
+_GIT_REF = os.environ.get("VERIRL_GIT_REF", "feat/working-grpo")
 
 if not os.path.exists(_WORKDIR):
     subprocess.run(
-        ["git", "clone", "--depth=1", _REPO, _WORKDIR],
+        ["git", "clone", "--depth=1", "--branch", _GIT_REF, _REPO, _WORKDIR],
         check=True,
     )
 
@@ -67,6 +69,62 @@ from training.trainer import build_grpo_config, run_training, setup_auth  # noqa
 
 _OUTPUT_DIR = f"{_WORKDIR}/checkpoints"
 os.makedirs(_OUTPUT_DIR, exist_ok=True)
+
+
+def _latest_checkpoint(root: str | Path) -> str | None:
+    root = Path(root)
+    checkpoints = []
+    for candidate in root.glob("checkpoint-*"):
+        if not candidate.is_dir():
+            continue
+        try:
+            step = int(candidate.name.rsplit("-", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        checkpoints.append((step, candidate))
+    if not checkpoints:
+        return None
+    return str(max(checkpoints, key=lambda item: item[0])[1])
+
+
+def _resolve_resume_checkpoint(config: TrainConfig, hf_token: str) -> str | None:
+    requested = os.environ.get("VERIRL_RESUME_FROM_CHECKPOINT", "").strip()
+    if not requested:
+        return None
+
+    if requested not in {"latest", "last-checkpoint"}:
+        print(f"[VeriRL] Resuming GRPO from explicit checkpoint: {requested}")
+        return requested
+
+    local_latest = _latest_checkpoint(_OUTPUT_DIR)
+    if local_latest:
+        print(f"[VeriRL] Resuming GRPO from local checkpoint: {local_latest}")
+        return local_latest
+
+    from huggingface_hub import snapshot_download  # noqa: E402
+
+    resume_dir = Path(_OUTPUT_DIR) / "hub_resume"
+    print(f"[VeriRL] Downloading checkpoints from {config.hf_output_repo} ...")
+    snapshot_download(
+        repo_id=config.hf_output_repo,
+        token=hf_token,
+        local_dir=resume_dir,
+        allow_patterns=["last-checkpoint/**", "checkpoint-*/**"],
+    )
+
+    last_checkpoint = resume_dir / "last-checkpoint"
+    if last_checkpoint.is_dir():
+        print(f"[VeriRL] Resuming GRPO from Hub checkpoint: {last_checkpoint}")
+        return str(last_checkpoint)
+
+    hub_latest = _latest_checkpoint(resume_dir)
+    if hub_latest:
+        print(f"[VeriRL] Resuming GRPO from Hub checkpoint: {hub_latest}")
+        return hub_latest
+
+    raise RuntimeError(
+        f"VERIRL_RESUME_FROM_CHECKPOINT={requested!r}, but no checkpoint was found"
+    )
 
 os.environ.update(
     {
@@ -188,6 +246,7 @@ print(f"[VeriRL] env_url     = {config.env_url}")
 print(f"[VeriRL] output_repo = {config.hf_output_repo}")
 
 try:
+    resume_from_checkpoint = _resolve_resume_checkpoint(config, hf_token)
     grpo_config = build_grpo_config(
         config,
         hf_token,
@@ -195,7 +254,13 @@ try:
         output_dir=_OUTPUT_DIR,
         **vllm_kwargs,
     )
-    result = run_training(config, grpo_config, hf_token, f"{_OUTPUT_DIR}/final")
+    result = run_training(
+        config,
+        grpo_config,
+        hf_token,
+        f"{_OUTPUT_DIR}/final",
+        resume_from_checkpoint=resume_from_checkpoint,
+    )
     print(f"[hf_jobs/grpo] Done: {result}")
 finally:
     if vllm_proc is not None:

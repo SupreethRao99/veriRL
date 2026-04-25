@@ -78,8 +78,8 @@ training:
     top_p: 0.95
     kl_coeff: 0.05              # β — KL penalty coefficient
     max_steps: 200
-    save_steps: 100
-    logging_steps: 10
+    save_steps: 20
+    logging_steps: 1
     warmup_ratio: 0.05
     push_to_hub: true
 

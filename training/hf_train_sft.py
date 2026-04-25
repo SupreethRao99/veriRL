@@ -39,10 +39,11 @@ import sys
 
 _REPO = "https://github.com/SupreethRao99/veriRL.git"
 _WORKDIR = "/tmp/verirl"
+_GIT_REF = os.environ.get("VERIRL_GIT_REF", "feat/working-grpo")
 
 if not os.path.exists(_WORKDIR):
     subprocess.run(
-        ["git", "clone", "--depth=1", _REPO, _WORKDIR],
+        ["git", "clone", "--depth=1", "--branch", _GIT_REF, _REPO, _WORKDIR],
         check=True,
     )
 

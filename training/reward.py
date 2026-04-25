@@ -7,6 +7,8 @@ stored on env.reward by submit() or the auto-grade path in _step().
 
 from __future__ import annotations
 
+from training.wandb_task_logging import record_task_reward
+
 
 def reward_func(environments, **kwargs) -> list[float]:
     rewards = []
@@ -15,6 +17,7 @@ def reward_func(environments, **kwargs) -> list[float]:
         # episode ended without submit/auto-grade (e.g. TRL turn limit hit before
         # any tool call), so reward is 0.
         r = env._reward_queue.popleft() if env._reward_queue else 0.0
+        record_task_reward(env.task_id, r)
         print(f"[reward] task={env.task_id} score={r:.3f} queue_remaining={len(env._reward_queue)} env_id={id(env)}")
         rewards.append(r)
     return rewards

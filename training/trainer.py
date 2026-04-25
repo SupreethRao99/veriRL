@@ -9,6 +9,13 @@ import wandb
 from huggingface_hub import login
 
 from training.config import TrainConfig
+from training.wandb_task_logging import clear_task_rewards, flush_task_rewards
+
+
+def _configure_wandb_defaults() -> None:
+    """Set stable W&B names while allowing the caller to override them."""
+    os.environ.setdefault("WANDB_PROJECT", "verirl-grpo")
+    os.environ.setdefault("WANDB_RUN_NAME", "verirl-grpo-qwen3-4b-thinking")
 
 
 def setup_auth() -> tuple[str, str | None]:
@@ -18,6 +25,7 @@ def setup_auth() -> tuple[str, str | None]:
 
     wandb_key = os.environ.get("WANDB_API_KEY")
     if wandb_key:
+        _configure_wandb_defaults()
         wandb.login(key=wandb_key)
     return hf_token, wandb_key
 
@@ -68,6 +76,7 @@ def build_grpo_config(
 ):
     """Assemble a GRPOConfig from TrainConfig. Extra kwargs are forwarded as overrides."""
     from trl import GRPOConfig
+
     return GRPOConfig(
         output_dir=output_dir,
         num_train_epochs=config.num_train_epochs,
@@ -82,12 +91,14 @@ def build_grpo_config(
         beta=config.kl_coeff,
         max_steps=config.max_steps,
         save_steps=config.save_steps,
-        logging_steps=config.logging_steps,
+        save_total_limit=3,
+        hub_strategy="checkpoint",
+        logging_steps=1,
         push_to_hub=config.push_to_hub,
         hub_model_id=config.hf_output_repo,
         hub_token=hf_token,
         report_to="wandb" if wandb_key else "none",
-        run_name="verirl-grpo-qwen3-4b-thinking",
+        run_name=os.environ.get("WANDB_RUN_NAME", "verirl-grpo-qwen3-4b-thinking"),
         bf16=True,
         remove_unused_columns=False,
         dataloader_num_workers=0,
@@ -102,14 +113,26 @@ def run_training(
     grpo_config,
     hf_token: str,
     final_model_dir: str,
+    resume_from_checkpoint: str | bool | None = None,
 ) -> dict:
     """Run agentic GRPO training."""
     from peft import LoraConfig
+    from transformers import TrainerCallback
     from trl import GRPOTrainer
     from training.curriculum import ALL_TASKS
     from training.dataset import build_dataset
     from training.environment import make_env_class
     from training.reward import reward_func
+
+    class WandbTaskRewardCallback(TrainerCallback):
+        """Flush per-task reward means at the trainer's global step."""
+
+        def on_step_end(self, args, state, control, **kwargs):
+            flush_task_rewards(
+                int(state.global_step),
+                is_world_process_zero=getattr(state, "is_world_process_zero", True),
+            )
+            return control
 
     model, tokenizer = load_model_and_tokenizer(config, hf_token)
 
@@ -131,6 +154,7 @@ def run_training(
     )
 
     VerirlToolEnv = make_env_class(config.env_url)
+    clear_task_rewards()
 
     trainer = GRPOTrainer(
         model=model,
@@ -140,9 +164,10 @@ def run_training(
         processing_class=tokenizer,
         peft_config=peft_config,
         environment_factory=VerirlToolEnv,
+        callbacks=[WandbTaskRewardCallback()],
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     print("[VeriRL] Saving final model ...")
     trainer.save_model(final_model_dir)

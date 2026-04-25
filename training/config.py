@@ -74,8 +74,8 @@ class TrainConfig:
     top_p: float = 0.95
     kl_coeff: float = 0.05
     max_steps: int = 500
-    save_steps: int = 100
-    logging_steps: int = 10
+    save_steps: int = 20
+    logging_steps: int = 1
     warmup_ratio: float = 0.05
     push_to_hub: bool = True
 

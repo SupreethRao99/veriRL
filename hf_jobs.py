@@ -43,11 +43,7 @@ import sys
 
 _GITHUB_ORG = "SupreethRao99"
 _GITHUB_REPO = "veriRL"
-_BRANCH = "main"
-_RAW = f"https://raw.githubusercontent.com/{_GITHUB_ORG}/{_GITHUB_REPO}/{_BRANCH}"
-
-_SFT_SCRIPT = f"{_RAW}/training/hf_train_sft.py"
-_GRPO_SCRIPT = f"{_RAW}/training/hf_train_grpo.py"
+_BRANCH_DEFAULT = os.environ.get("VERIRL_GIT_REF", "feat/working-grpo")
 
 _SFT_FLAVOR_DEFAULT = "a10g-large"
 _GRPO_FLAVOR_DEFAULT = "a10g-largex2"
@@ -60,6 +56,10 @@ _SECRETS = ["HF_TOKEN", "WANDB_API_KEY"]
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _raw_url(git_ref: str, path: str) -> str:
+    return f"https://raw.githubusercontent.com/{_GITHUB_ORG}/{_GITHUB_REPO}/{git_ref}/{path}"
+
 
 def _run_hf(*args: str, dry_run: bool = False) -> int:
     cmd = ["hf", "jobs", *args]
@@ -95,16 +95,23 @@ def _submit(
 # Commands
 # ---------------------------------------------------------------------------
 
-def cmd_sft(flavor: str, timeout: str, dry_run: bool) -> int:
+def cmd_sft(flavor: str, timeout: str, git_ref: str, dry_run: bool) -> int:
     return _submit(
-        script_url=_SFT_SCRIPT,
+        script_url=_raw_url(git_ref, "training/hf_train_sft.py"),
         flavor=flavor,
         timeout=timeout,
+        env={"VERIRL_GIT_REF": git_ref},
         dry_run=dry_run,
     )
 
 
-def cmd_train(flavor: str, timeout: str, dry_run: bool) -> int:
+def cmd_train(
+    flavor: str,
+    timeout: str,
+    git_ref: str,
+    resume_from_checkpoint: str | None,
+    dry_run: bool,
+) -> int:
     env_url = os.environ.get("VERIRL_ENV_URL", "").strip()
     if not env_url:
         print(
@@ -114,11 +121,14 @@ def cmd_train(flavor: str, timeout: str, dry_run: bool) -> int:
             file=sys.stderr,
         )
         return 1
+    env = {"VERIRL_ENV_URL": env_url, "VERIRL_GIT_REF": git_ref}
+    if resume_from_checkpoint:
+        env["VERIRL_RESUME_FROM_CHECKPOINT"] = resume_from_checkpoint
     return _submit(
-        script_url=_GRPO_SCRIPT,
+        script_url=_raw_url(git_ref, "training/hf_train_grpo.py"),
         flavor=flavor,
         timeout=timeout,
-        env={"VERIRL_ENV_URL": env_url},
+        env=env,
         dry_run=dry_run,
     )
 
@@ -151,12 +161,19 @@ def _parser() -> argparse.ArgumentParser:
     sft_p = sub.add_parser("sft", help="SFT warm-start on PyraNet-Verilog")
     sft_p.add_argument("--flavor", default=_SFT_FLAVOR_DEFAULT, help="HF Jobs hardware flavor")
     sft_p.add_argument("--timeout", default=_TIMEOUT_DEFAULT)
+    sft_p.add_argument("--git-ref", default=_BRANCH_DEFAULT, help="Git ref to run on HF Jobs")
 
     train_p = sub.add_parser(
         "train", help="RLVR GRPO training (requires VERIRL_ENV_URL env var)"
     )
     train_p.add_argument("--flavor", default=_GRPO_FLAVOR_DEFAULT, help="HF Jobs hardware flavor")
     train_p.add_argument("--timeout", default=_TIMEOUT_DEFAULT)
+    train_p.add_argument("--git-ref", default=_BRANCH_DEFAULT, help="Git ref to run on HF Jobs")
+    train_p.add_argument(
+        "--resume-from-checkpoint",
+        default=None,
+        help="Checkpoint path, `latest`, or Hub subfolder to pass to GRPO resume",
+    )
 
     sub.add_parser("ps", help="List running HF Jobs")
 
@@ -170,9 +187,9 @@ if __name__ == "__main__":
     args = _parser().parse_args()
 
     if args.command == "sft":
-        sys.exit(cmd_sft(args.flavor, args.timeout, args.dry_run))
+        sys.exit(cmd_sft(args.flavor, args.timeout, args.git_ref, args.dry_run))
     elif args.command == "train":
-        sys.exit(cmd_train(args.flavor, args.timeout, args.dry_run))
+        sys.exit(cmd_train(args.flavor, args.timeout, args.git_ref, args.resume_from_checkpoint, args.dry_run))
     elif args.command == "ps":
         sys.exit(cmd_ps(args.dry_run))
     elif args.command == "logs":
