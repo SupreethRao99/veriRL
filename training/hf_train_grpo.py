@@ -45,7 +45,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 _REPO = "https://github.com/SupreethRao99/veriRL.git"
-_WORKDIR = "/tmp/verirl"
+_WORKDIR = "/tmp/verirl_env"
 _GIT_REF = os.environ.get("VERIRL_GIT_REF", "feat/working-grpo")
 
 if not os.path.exists(_WORKDIR):
@@ -54,7 +54,10 @@ if not os.path.exists(_WORKDIR):
         check=True,
     )
 
+# The project maps the package name `verirl_env` to the repository root. Keep
+# both paths importable: one for top-level training modules, one for the package.
 sys.path.insert(0, _WORKDIR)
+sys.path.insert(0, str(Path(_WORKDIR).parent))
 os.chdir(_WORKDIR)
 
 # ---------------------------------------------------------------------------
