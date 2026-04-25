@@ -30,6 +30,9 @@ Usage:
     uv run --project . server
 """
 
+from pathlib import Path
+
+from omegaconf import OmegaConf
 from pydantic import BaseModel
 
 # Support both in-repo and standalone imports
@@ -45,6 +48,16 @@ except ImportError:
 
     from models import VerirlAction, VerirlObservation
     from server.verirl_env_environment import _TASK_CONFIGS, VerirlEnvironment
+
+
+def _load_max_concurrent_envs() -> int:
+    for candidate in [
+        Path(__file__).parent.parent / "config.yaml",
+        Path("/root/verirl/config.yaml"),
+    ]:
+        if candidate.exists():
+            return int(OmegaConf.load(candidate).server.max_concurrent_envs)
+    return 64  # safe default if config not found
 
 
 class TaskInfo(BaseModel):
@@ -63,7 +76,7 @@ app = create_app(
     VerirlAction,
     VerirlObservation,
     env_name="verirl_env",
-    max_concurrent_envs=10,
+    max_concurrent_envs=_load_max_concurrent_envs(),
 )
 
 
