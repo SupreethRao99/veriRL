@@ -35,6 +35,7 @@ import argparse
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 _GITHUB_ORG = "SupreethRao99"
@@ -60,14 +61,21 @@ def _raw_url(git_ref: str, path: str) -> str:
 
 
 def _hf_token_secret_arg() -> str:
-    """Read the HF token from env or the hf CLI auth store.
+    """Read the HF token from env or the cached HF credentials file.
 
     Returns:
         A ``"HF_TOKEN=<value>"`` string suitable for passing to ``--secrets``.
     """
     token = os.environ.get("HF_TOKEN")
     if not token:
-        token = subprocess.check_output(["hf", "auth", "token"], text=True).strip()
+        cache = Path.home() / ".cache" / "huggingface" / "token"
+        if cache.exists():
+            token = cache.read_text().strip()
+    if not token:
+        raise RuntimeError(
+            "HF_TOKEN not set and ~/.cache/huggingface/token not found. "
+            "Run: huggingface-cli login"
+        )
     return f"HF_TOKEN={token}"
 
 
@@ -202,46 +210,97 @@ def cmd_eval(
     n_runs: int,
     dry_run: bool,
 ) -> int:
-    """Submit the model comparison evaluation job to HF Jobs (single L4).
+    """Submit the model comparison evaluation job via huggingface_hub.run_job.
 
-    Runs Base → SFT → GRPO inference on the three easy tasks and prints a
-    markdown score table. Requires ``VERIRL_ENV_URL`` to point at the deployed
-    VeriRL environment (HF Space or equivalent).
+    Runs Base → SFT → GRPO inference on the three easy tasks and streams logs
+    until the job completes. Requires ``VERIRL_ENV_URL`` in the environment.
 
     Args:
-        flavor: HF Jobs hardware flavor (default: ``l4-small``).
-        timeout: Job timeout string.
+        flavor: HF Jobs hardware flavor (default: ``a10g-large``).
+        timeout: Job timeout in hours as a string, e.g. ``"4h"`` → 14400 s.
         git_ref: Git branch or commit SHA to run.
-        grpo_model: HF repo ID of the GRPO checkpoint, or ``None`` to use the default.
+        grpo_model: HF repo ID of the GRPO checkpoint, or ``None`` to use default.
         n_runs: Number of episodes per (model, task) pair.
-        dry_run: If ``True``, print without submitting.
+        dry_run: If ``True``, print config without submitting.
 
     Returns:
-        The ``hf`` CLI return code, or 1 if ``VERIRL_ENV_URL`` is not set.
+        0 on success, 1 on error.
     """
+    from dotenv import load_dotenv
+    load_dotenv()
+
     env_url = os.environ.get("VERIRL_ENV_URL", "").strip()
     if not env_url:
         print(
             "ERROR: VERIRL_ENV_URL is not set.\n"
-            "Set it to your deployed VeriRL env server, e.g.:\n"
-            "  export VERIRL_ENV_URL=https://<username>-verirl-env.hf.space",
+            "Set it in your .env file or environment, e.g.:\n"
+            "  export VERIRL_ENV_URL=https://Supreeth-verirl-env.hf.space",
             file=sys.stderr,
         )
         return 1
-    env: dict[str, str] = {
+
+    # Get HF token — try env first, then huggingface_hub cache
+    try:
+        from huggingface_hub.utils import get_token
+        hf_token = os.environ.get("HF_TOKEN") or get_token() or ""
+    except Exception:
+        hf_token = os.environ.get("HF_TOKEN", "")
+
+    if not hf_token:
+        print("ERROR: No HF token found. Run: huggingface-cli login", file=sys.stderr)
+        return 1
+
+    wandb_key = os.environ.get("WANDB_API_KEY", "")
+
+    script_url = _raw_url(git_ref, "training/hf_eval_models.py")
+
+    # Convert "4h" → seconds for run_job
+    timeout_sec = int(timeout.rstrip("h")) * 3600 if timeout.endswith("h") else int(timeout)
+
+    job_env: dict[str, str] = {
         "VERIRL_ENV_URL": env_url,
         "VERIRL_GIT_REF": git_ref,
         "EVAL_N_RUNS": str(n_runs),
     }
     if grpo_model:
-        env["VERIRL_GRPO_MODEL"] = grpo_model
-    return _submit(
-        script_url=_raw_url(git_ref, "training/hf_eval_models.py"),
-        flavor=flavor,
-        timeout=timeout,
-        env=env,
-        dry_run=dry_run,
-    )
+        job_env["VERIRL_GRPO_MODEL"] = grpo_model
+
+    secrets: dict[str, str] = {"HF_TOKEN": hf_token}
+    if wandb_key:
+        secrets["WANDB_API_KEY"] = wandb_key
+
+    if dry_run:
+        print(f"[dry-run] run_job(")
+        print(f"  command=['bash','-c','pip install uv -q && uv run {script_url}'],")
+        print(f"  flavor={flavor!r},")
+        print(f"  timeout={timeout_sec},")
+        print(f"  env={job_env},")
+        print(f"  secrets={{HF_TOKEN: <redacted>, ...}},")
+        print(f")")
+        return 0
+
+    print(f"[hf_jobs/eval] Submitting eval job — flavor={flavor}  timeout={timeout}",
+          flush=True)
+    print(f"[hf_jobs/eval] Script: {script_url}", flush=True)
+
+    try:
+        from huggingface_hub import run_job
+        job = run_job(
+            command=["bash", "-c", f"pip install uv -q && uv run {script_url}"],
+            flavor=flavor,
+            timeout=timeout_sec,
+            env=job_env,
+            secrets=secrets,
+        )
+        print(f"[hf_jobs/eval] Job submitted: {getattr(job, 'id', job)}", flush=True)
+        # Stream logs until the job finishes
+        if hasattr(job, "logs"):
+            for line in job.logs():
+                print(line, end="", flush=True)
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_ps(dry_run: bool) -> int:
