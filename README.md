@@ -13,6 +13,8 @@ tags:
 
 [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/raw/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/Supreeth/verirl-env)
 
+**[📖 Read the blog](BLOG.md)** &nbsp;·&nbsp; [📊 W&B Training Run](https://api.wandb.ai/links/supreethrao/cdpml221) &nbsp;·&nbsp; [🤗 SFT Checkpoint](https://huggingface.co/Supreeth/verirl-sft-qwen3-4b-thinking-merged) &nbsp;·&nbsp; [🤗 GRPO Checkpoint](https://huggingface.co/Supreeth/verirl-rlvr-qwen3-4b-thinking)
+
 An OpenEnv environment for training and evaluating language models on synthesizable Verilog RTL design. Agents implement hardware modules for AI-accelerator primitives and receive graded feedback from real EDA tools — not heuristics, not LLM judges.
 
 ## Overview

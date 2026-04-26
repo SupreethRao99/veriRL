@@ -28,19 +28,18 @@ These are not independent gates. You can pass compilation and fail simulation. Y
 
 ### Frontier Models Don't Do Well Here
 
-To establish a baseline, we evaluated several frontier models on VeriRL tasks directly — zero-shot, with access to the full task specification but no interaction loop (single-shot generation, then scored). The results illustrate the gap that motivated this work:
+To establish a baseline, we ran GPT-5.4-mini on VeriRL easy tasks via the full interactive tool loop — the same loop our trained model uses. The scores below are EDA-graded composites (compile 25%, simulation 40%, timing/area 25%, formal 10%):
 
-<!-- INSERT: Table of frontier model scores
-| Model | MAC (easy) | AXI-FIFO (medium) | Systolic Array (hard) | FP16 Adder (hard) | Mean |
-|-------|-----------|------------------|-----------------------|------------------|------|
-| GPT-4o | ?? | ?? | ?? | ?? | ?? |
-| Claude 3.5 Sonnet | ?? | ?? | ?? | ?? | ?? |
-| Qwen3-4B (base, zero-shot) | ?? | ?? | ?? | ?? | ?? |
+| Model | MAC unit (easy) | ReLU-Clip (easy) | Barrel Shifter (easy) | Mean |
+|-------|----------------|-----------------|----------------------|------|
+| **GPT-5.4-mini** (frontier, tool-use) | 0.56 | 0.97 | 0.79 | **0.77** |
+| Qwen3-4B base (no fine-tuning) | 0.01 | 0.01 | 0.01 | **0.01** |
+| + SFT (description→Verilog) | 0.01 | 0.01 | 0.01 | **0.01** |
+| + GRPO (RL on tool loop) | 0.01 | **0.37** | **0.27** | **0.22** |
 
-Caption: Scores are weighted EDA-tool scores ∈ [0.01, 0.99] — compile (25%), simulation (40%), timing/area (25%), formal (10%). Single-shot, no tool interaction.
--->
+The frontier model confirms the tasks are solvable — GPT-5.4-mini scores 0.77 mean on easy tasks using exactly the same tool loop we trained our model on. The Qwen3-4B base and SFT scores at floor (0.01) reflect a format issue: the base model and our SFT checkpoint were never trained on the JSON tool-use format, so they produce raw Verilog instead of the required `{"action_type": "write_file", ...}` payload. GRPO is what teaches the model to use the tool loop correctly through direct RL signal.
 
-The pattern is consistent: easy tasks (combinational logic, simple pipelines) are manageable. Medium and hard tasks — especially anything with multi-cycle timing requirements or formal properties — see dramatic drops. The systolic array and FP16 adder tasks in particular expose the failure mode: models produce Verilog that looks plausible, compiles, and even passes some test cases, but fails on the edge cases the testbench was specifically designed to catch.
+The pattern is clear: easy tasks (combinational logic, simple pipelines) are manageable for frontier models but require iteration even there — GPT-5.4-mini needed 4–8 tool calls to reach its scores. The interactive loop is not optional.
 
 This is exactly where an interactive tool loop helps. An engineer would compile, see the error, fix it, simulate, see which assertions fail, look at the waveform, and iterate. We give the model the same loop.
 
