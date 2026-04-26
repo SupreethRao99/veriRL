@@ -239,9 +239,11 @@ def cmd_eval(
         )
         return 1
 
+    # Use the branch name for the remote git clone (SHAs don't work with --branch),
+    # but allow git_ref to be a SHA in the raw script URL for CDN cache busting.
     env: dict[str, str] = {
         "VERIRL_ENV_URL": env_url,
-        "VERIRL_GIT_REF": git_ref,
+        "VERIRL_GIT_REF": _BRANCH_DEFAULT,
         "EVAL_N_RUNS": str(n_runs),
     }
     if grpo_model:
