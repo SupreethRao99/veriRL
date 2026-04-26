@@ -278,10 +278,8 @@ def _fmt_obs(obs) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_action(text: str) -> VerirlAction:
-    # Strip Qwen3 thinking blocks — model may emit <think>...</think> even when
-    # enable_thinking=False is not honoured by the vLLM version in use.
-    t = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+def _try_parse_json(t: str) -> "VerirlAction | None":
+    """Try to extract and parse the first JSON object from text. Returns None on failure."""
     for fence in ("```json", "```"):
         if fence in t:
             t = t.split(fence)[1].split("```")[0].strip()
@@ -295,6 +293,27 @@ def _parse_action(text: str) -> VerirlAction:
             return VerirlAction(**{k: v for k, v in data.items() if k in valid})
         except Exception:
             pass
+    return None
+
+
+def _parse_action(text: str) -> VerirlAction:
+    # Primary: strip Qwen3 thinking blocks and parse what remains.
+    # Models trained with enable_thinking=True (e.g. SFT) output:
+    #   <think>...</think>\n{"action_type": ...}
+    no_think = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    result = _try_parse_json(no_think)
+    if result is not None:
+        return result
+
+    # Fallback: search *inside* thinking blocks. Models trained with
+    # enable_thinking=False (e.g. GRPO) learned to output JSON directly; when
+    # served by vLLM with thinking enabled, the JSON ends up inside <think>.
+    think_parts = re.findall(r"<think>(.*?)</think>", text, flags=re.DOTALL)
+    for part in think_parts:
+        result = _try_parse_json(part)
+        if result is not None:
+            return result
+
     return VerirlAction(action_type="submit", message="parse error")
 
 
