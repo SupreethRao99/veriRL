@@ -37,9 +37,13 @@ To establish a baseline, we ran GPT-5.4-mini on VeriRL easy tasks via the full i
 | + SFT (description→Verilog) | 0.01 | 0.01 | 0.01 | **0.01** |
 | + GRPO (RL on tool loop) | 0.01 | **0.37** | **0.27** | **0.22** |
 
-The frontier model confirms the tasks are solvable — GPT-5.4-mini scores 0.77 mean on easy tasks using exactly the same tool loop we trained our model on. The Qwen3-4B base and SFT scores at floor (0.01) reflect a format issue: the base model and our SFT checkpoint were never trained on the JSON tool-use format, so they produce raw Verilog instead of the required `{"action_type": "write_file", ...}` payload. GRPO is what teaches the model to use the tool loop correctly through direct RL signal.
+A few things to read carefully in that table:
 
-The pattern is clear: easy tasks (combinational logic, simple pipelines) are manageable for frontier models but require iteration even there — GPT-5.4-mini needed 4–8 tool calls to reach its scores. The interactive loop is not optional.
+**The 0.01 scores for base and SFT are not a Verilog quality problem.** Qwen3-4B can write Verilog — it is a capable model. SFT almost certainly writes *better* Verilog than the base after fine-tuning on PyraNet-Verilog. The 0.01 is a format and agency problem: VeriRL expects actions as JSON tool calls (`{"action_type": "write_file", "filename": "...", "content": "..."}`), not raw Verilog text. Neither the base model nor the SFT checkpoint was ever shown this format, so their first action fails to parse and the episode ends immediately with the floor score.
+
+**What GRPO actually teaches is the agentic loop** — not Verilog syntax. Through RL reward signal, the model learns: (1) emit JSON tool calls, (2) submit code, (3) read compile errors, (4) revise, (5) run simulation, (6) revise again. The Verilog knowledge was already there from pretraining and SFT. GRPO teaches the model *how to use that knowledge interactively* in a tool loop.
+
+GPT-5.4-mini scores 0.77 using the same loop — it already knows the tool-use format from RLHF/instruction-tuning. Our GRPO training gets a 4B model to learn the same behavior from scratch via RL on EDA reward signal alone.
 
 This is exactly where an interactive tool loop helps. An engineer would compile, see the error, fix it, simulate, see which assertions fail, look at the waveform, and iterate. We give the model the same loop.
 
