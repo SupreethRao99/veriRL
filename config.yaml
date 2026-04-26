@@ -42,14 +42,14 @@ inference:
 sft:
   base_model: "Qwen/Qwen3-4B-Thinking-2507"
   output_repo: "Supreeth/verirl-sft-qwen3-4b-tooluse"
-  max_seq_length: 4096   # tool-use JSON format is longer than raw Verilog
+  max_seq_length: 2048   # write_file actions are short; 4096 was wasteful
   num_train_epochs: 1
   lora_r: 16
   lora_alpha: 32
   per_device_batch_size: 16  # H200 141 GB vs H100 80 GB — doubled
   gradient_accumulation_steps: 4
-  warmup_steps: 100
-  max_steps: -1
+  warmup_steps: 20
+  max_steps: 250             # format learning; full dataset not needed
   learning_rate: 2.0e-4
   save_steps: 500
   max_samples: 100000  # out of 692K; filter to compile-clean only
