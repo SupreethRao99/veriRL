@@ -161,15 +161,14 @@ The GRPO rollout is multi-turn: the model can call up to 15 tools in a single ep
 
 **Full training run**: [VeriRL GRPO (ReLU CLIP) — W&B Report](https://api.wandb.ai/links/supreethrao/cdpml221)
 
-<!-- INSERT: Reward curve plot
-![Composite reward over training steps](docs/plots/grpo_composite_reward.png)
-*Composite reward (weighted average of tool, compile, sim, and final components) over GRPO training steps. The curve shows [describe what you see — early flat region, inflection point, plateau, etc.]*
--->
+![Composite reward over 100 GRPO training steps on ReLU-Clip](docs/plots/relu_clip-combined.png)
+*Composite reward (weighted sum of tool, compile, sim, and final components) over 100 GRPO training steps on the ReLU-Clip task. Three phases are visible: early exploration (~steps 0–15, reward ~0.27), a learning phase peaking at ~0.65 around step 35–40, and a stabilized plateau of ~0.42–0.45 for the remainder of training — a ~70% relative improvement over the starting baseline.*
 
-<!-- INSERT: Per-component reward plot (optional but strong)
-![Reward components over training steps](docs/plots/grpo_reward_components.png)
-*Individual reward components over training. Note how compile reward saturates early (~step X), followed by sim reward climbing through step Y, and final score improving last — consistent with the model first learning to produce valid Verilog, then learning to make it correct.*
--->
+The per-component breakdown shows what drives each phase:
+
+![Per-component reward curves: tool, sim, compile](docs/plots/relu_clip-compile.png) ![](docs/plots/relu_clip-sim.png) ![](docs/plots/relu_clip-tool.png)
+
+*Left to right: compile reward (saturates quickly to ~0.7–1.0, confirming the SFT warm-start gave the model valid Verilog syntax from the start), simulation reward (the primary learning signal — climbs from ~0.2 to ~0.6–0.8 as the model learns to pass more testbench assertions), and tool-use reward (stable ~0.4–0.5 throughout, showing tool-loop behavior was already established by SFT).*
 
 ### Score Comparison: Base → SFT → GRPO
 
