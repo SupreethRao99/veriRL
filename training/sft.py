@@ -195,14 +195,16 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     )
 
     tokenizer.model_max_length = config.sft_max_seq_length
-    # Unsloth patches Qwen2Tokenizer at class level, making eos_token return
-    # '<EOS_TOKEN>' which is not in the Qwen3 vocabulary. TRL 0.24 validates
-    # this unconditionally. Bypass by setting the underlying _eos_token attribute
-    # that the SpecialTokensMixin property reads from, skipping any overrides.
+    # Unsloth replaces eos_token as a class-level property on Qwen2Tokenizer,
+    # making every instance return '<EOS_TOKEN>' (not in Qwen3 vocab). TRL 0.24
+    # validates this unconditionally. Restore the standard SpecialTokensMixin
+    # property on the class, then set the correct eos_token via the normal setter.
+    from transformers.tokenization_utils_base import SpecialTokensMixin
     sft_tokenizer = AutoTokenizer.from_pretrained(
         config.sft_base_model, token=hf_token, model_max_length=config.sft_max_seq_length
     )
-    sft_tokenizer._eos_token = "<|im_end|>"
+    type(sft_tokenizer).eos_token = SpecialTokensMixin.__dict__["eos_token"]
+    sft_tokenizer.eos_token = "<|im_end|>"
 
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
