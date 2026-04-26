@@ -246,12 +246,71 @@ VeriRL ships a full two-phase RLVR training stack (SFT warm-start → GRPO fine-
 **Model:** `Qwen/Qwen3-4B-Thinking-2507` → SFT → GRPO with QLoRA (rank-1)
 **Infrastructure:** HuggingFace Jobs (primary) or Modal Labs (alternative)
 
-Training is split across two SFT/GRPO extras that pin incompatible TRL versions:
+Training is split across two phases with incompatible TRL version requirements (TRL 0.x for SFT with Unsloth, TRL 1.x for GRPO with vLLM), so they run in separate jobs/images.
 
-| Phase | Extra | Script | Hardware |
-|-------|-------|--------|----------|
-| SFT warm-start | `sft` (TRL 0.x + Unsloth) | `training/hf_train_sft.py` | 1×A10G |
-| RLVR GRPO | `grpo` (TRL 1.x + vLLM) | `training/hf_train_grpo.py` | 2×A10G or 1×H200 |
+### Reproducing the Training Run
+
+**Key files:**
+
+| File | What it does |
+|------|-------------|
+| [`training/sft.py`](training/sft.py) | SFT training loop — loads PyraNet-Verilog, formats examples, runs Unsloth + SFTTrainer |
+| [`training/trainer.py`](training/trainer.py) | GRPO training loop — loads model, builds GRPOConfig, runs TRL GRPOTrainer with VeriRL env |
+| [`training/hf_train_sft.py`](training/hf_train_sft.py) | HF Jobs entry point for SFT — bootstraps the repo and calls `training/sft.py` |
+| [`training/hf_train_grpo.py`](training/hf_train_grpo.py) | HF Jobs entry point for GRPO — bootstraps the repo and calls `training/trainer.py` |
+| [`infra/hf_jobs.py`](infra/hf_jobs.py) | CLI to submit SFT/GRPO/eval jobs to HuggingFace Jobs |
+| [`infra/modal_infra.py`](infra/modal_infra.py) | Alternative: submit SFT/GRPO to Modal Labs |
+| [`config.yaml`](config.yaml) | All hyperparameters — model repos, LoRA rank, reward weights, curriculum |
+
+**Step 1 — SFT warm-start** (`training/sft.py` via Unsloth + TRL 0.x)
+
+Trains `Qwen3-4B-Thinking` on [PyraNet-Verilog](https://huggingface.co/datasets/bnadimi/PyraNet-Verilog) (692K compile-clean Verilog samples) to give the model Verilog syntax and idioms before RL. Takes ~30 min on 1×H200 or ~1h on 1×A10G.
+
+```bash
+# Via HuggingFace Jobs (recommended — no local GPU needed)
+huggingface-cli login
+python infra/hf_jobs.py sft
+
+# Via Modal Labs
+modal run infra/modal_infra.py::sft
+
+# Monitor
+python infra/hf_jobs.py ps
+python infra/hf_jobs.py logs <job-id>
+```
+
+The SFT job pushes two Hub repos on completion:
+- `<your-hf-username>/verirl-sft-qwen3-4b-thinking` — LoRA adapter
+- `<your-hf-username>/verirl-sft-qwen3-4b-thinking-merged` — merged bf16 weights (needed for vLLM in GRPO)
+
+**Step 2 — GRPO fine-tuning** (`training/trainer.py` via TRL 1.x + vLLM)
+
+Runs multi-turn GRPO rollouts against the live VeriRL environment. The model interacts with the EDA toolchain and receives reward from real tool output — no labels, no LLM judges.
+
+Requires a running VeriRL environment server. The easiest way is to point at your deployed HF Space:
+
+```bash
+# Set your environment server URL
+export VERIRL_ENV_URL=https://<your-username>-verirl-env.hf.space
+
+# Via HuggingFace Jobs (2×A10G — vLLM server mode)
+python infra/hf_jobs.py train
+
+# Via Modal Labs (2×A10G)
+modal run infra/modal_infra.py::train
+```
+
+Update `config.yaml` to point at your SFT checkpoint before running:
+
+```yaml
+training:
+  model:
+    base_model: <your-hf-username>/verirl-sft-qwen3-4b-thinking
+    vllm_base_model: <your-hf-username>/verirl-sft-qwen3-4b-thinking-merged
+    hf_output_repo: <your-hf-username>/verirl-rlvr-qwen3-4b-thinking
+```
+
+All other hyperparameters (LoRA rank, reward weights, curriculum, learning rate) live in [`config.yaml`](config.yaml) and can be overridden without touching code.
 
 ### HuggingFace Jobs (recommended)
 
