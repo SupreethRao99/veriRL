@@ -1,3 +1,9 @@
+## [0.7.2] - 2026-04-26
+
+Documentation
+~~~~~~~~~~~~~
+
+- Add 'Reproducing the Training Run' section to README with step-by-step SFT and GRPO instructions (docs-training-guide)
 ## [0.7.1] - 2026-04-26
 
 Miscellaneous
