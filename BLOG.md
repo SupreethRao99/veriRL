@@ -6,7 +6,7 @@
 
 Every time a language model answers a question, a matrix multiply is firing on custom silicon. That silicon — the MAC units, activation pipelines, memory controllers — was designed by engineers writing **Verilog**, a hardware description language that specifies logic down to individual flip-flops and gates. It is one of the most unforgiving programming tasks that exists: the compiler either accepts your design or it doesn't, the testbench either passes or it fails, the synthesis tool either meets timing or it doesn't. There is no partial credit for "almost right" combinational logic.
 
-Here is the uncomfortable truth: current language models are bad at this. Not because they don't know what a flip-flop is — they do. But because they have never been trained on the feedback that actually matters. They learned to write Python from Python being everywhere on the internet. Verilog is not everywhere, and correctness feedback from EDA tools is essentially absent from any pretraining corpus.
+Current language models are bad at this. Not because they don't know what a flip-flop is — they do. But because they have never been trained on the feedback that actually matters. They learned to write Python from Python being everywhere on the internet. Verilog is not everywhere, and correctness feedback from EDA tools is essentially absent from any pretraining corpus.
 
 We built **VeriRL** to fix the feedback loop.
 
@@ -24,7 +24,7 @@ A hardware module is correct only when it satisfies all of the following simulta
 4. **Meets timing constraints** — pipelined designs must hit the cycle count target; missing by one cycle fails
 5. **Satisfies formal properties** — for safety-critical modules, SymbiYosys must prove the SVA assertions across all possible inputs, not just the test vectors
 
-These are not independent gates. You can pass compilation and fail simulation. You can pass simulation and fail area. You can pass both and fail formal. The feedback signal is rich, layered, and — critically — it is **ground truth from deterministic tools**, not an LLM judge that can be fooled by confident-sounding output.
+These are not independent gates. You can pass compilation and fail simulation. You can pass simulation and fail area. You can pass both and fail formal. The feedback signal is rich, layered, and — critically — it is **ground truth from deterministic tools**.
 
 ### Frontier Models Don't Do Well Here
 
@@ -38,8 +38,6 @@ To establish a baseline, we ran GPT-5.4-mini on VeriRL easy tasks via the full i
 | + GRPO (RL on tool loop) | 0.01 | **0.37** | **0.27** | **0.22** |
 
 A few things to read carefully in that table:
-
-**The 0.01 scores for base and SFT are not a Verilog quality problem.** Qwen3-4B can write Verilog — it is a capable model. SFT almost certainly writes *better* Verilog than the base after fine-tuning on PyraNet-Verilog. The 0.01 is a format and agency problem: VeriRL expects actions as JSON tool calls (`{"action_type": "write_file", "filename": "...", "content": "..."}`), not raw Verilog text. Neither the base model nor the SFT checkpoint was ever shown this format, so their first action fails to parse and the episode ends immediately with the floor score.
 
 **What GRPO actually teaches is the agentic loop** — not Verilog syntax. Through RL reward signal, the model learns: (1) emit JSON tool calls, (2) submit code, (3) read compile errors, (4) revise, (5) run simulation, (6) revise again. The Verilog knowledge was already there from pretraining and SFT. GRPO teaches the model *how to use that knowledge interactively* in a tool loop.
 
