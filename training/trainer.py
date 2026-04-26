@@ -10,32 +10,24 @@ from __future__ import annotations
 
 import os
 
-import torch
 import wandb
 from huggingface_hub import login
-from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
-from trl import GRPOConfig, GRPOTrainer
-from trl.chat_template_utils import qwen3_schema, qwen3_training_chat_template
 
-from training.config import TrainConfig
-from training.curriculum import ALL_TASKS
-from training.dataset import build_dataset
-from training.environment import make_env_class
-from training.reward import compile_reward, final_score_reward, sim_reward, tool_use_reward
-from training.wandb_task_logging import clear_task_rewards, flush_task_rewards
+# Heavy GRPO deps (torch, trl, peft, transformers) are imported lazily inside
+# the functions that need them so this module can be safely imported by the SFT
+# job (which uses a different image that may not have trl 1.x / mergekit).
 
 
-class WandbTaskRewardCallback(TrainerCallback):
+class WandbTaskRewardCallback:
     """Flush per-task reward means to W&B at the end of each trainer step.
 
-    GRPOTrainer calls ``on_step_end`` after every gradient update. This
-    callback drains the ``_PENDING`` buffer in ``wandb_task_logging`` and
-    logs one mean-reward metric per task against the current global step.
+    Defined as a plain class here; mixed in with TrainerCallback at call-time
+    inside run_training to avoid importing transformers at module level.
     """
 
     def on_step_end(self, args, state, control, **kwargs):
         """Log buffered per-task rewards and return the unchanged control object."""
+        from training.wandb_task_logging import flush_task_rewards
         flush_task_rewards(
             int(state.global_step),
             is_world_process_zero=getattr(state, "is_world_process_zero", True),
@@ -73,7 +65,7 @@ def setup_auth() -> tuple[str, str | None]:
     return hf_token, wandb_key
 
 
-def load_model_and_tokenizer(config: TrainConfig, hf_token: str):
+def load_model_and_tokenizer(config, hf_token: str):
     """Load the pre-merged SFT model in bf16 for GRPO fine-tuning.
 
     Loads ``config.vllm_base_model`` (the already-merged full-weight repo)
@@ -96,6 +88,10 @@ def load_model_and_tokenizer(config: TrainConfig, hf_token: str):
     Returns:
         A ``(model, tokenizer)`` tuple ready to pass to ``GRPOTrainer``.
     """
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from trl.chat_template_utils import qwen3_schema, qwen3_training_chat_template
+
     model = AutoModelForCausalLM.from_pretrained(
         config.vllm_base_model,
         device_map={"": 0},
@@ -108,6 +104,9 @@ def load_model_and_tokenizer(config: TrainConfig, hf_token: str):
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # SFT sets tokenizer.model_max_length=2048 for packing; reset to the actual
+    # GRPO context window so transformers doesn't warn on longer rollouts.
+    tokenizer.model_max_length = config.max_model_length
 
     tokenizer.response_schema = qwen3_schema
     tokenizer.chat_template = qwen3_training_chat_template
@@ -116,12 +115,12 @@ def load_model_and_tokenizer(config: TrainConfig, hf_token: str):
 
 
 def build_grpo_config(
-    config: TrainConfig,
+    config,
     hf_token: str,
     wandb_key: str | None,
     output_dir: str,
     **extra_kwargs,
-) -> GRPOConfig:
+):
     """Assemble a ``GRPOConfig`` from a ``TrainConfig``.
 
     Args:
@@ -135,6 +134,7 @@ def build_grpo_config(
     Returns:
         A fully configured ``GRPOConfig`` instance.
     """
+    from trl import GRPOConfig
     return GRPOConfig(
         output_dir=output_dir,
         num_train_epochs=config.num_train_epochs,
@@ -168,8 +168,8 @@ def build_grpo_config(
 
 
 def run_training(
-    config: TrainConfig,
-    grpo_config: GRPOConfig,
+    config,
+    grpo_config,
     hf_token: str,
     final_model_dir: str,
     resume_from_checkpoint: str | bool | None = None,
@@ -192,6 +192,24 @@ def run_training(
     Returns:
         A dict with ``status`` and ``output_repo`` keys.
     """
+    from peft import LoraConfig
+    from transformers import TrainerCallback
+    from trl import GRPOTrainer
+
+    from training.config import TrainConfig
+    from training.curriculum import ALL_TASKS
+    from training.dataset import build_dataset
+    from training.environment import make_env_class
+    from training.reward import compile_reward, final_score_reward, sim_reward, tool_use_reward
+    from training.wandb_task_logging import clear_task_rewards
+
+    # Mix TrainerCallback in at call-time to avoid importing transformers at module level
+    WandbTaskRewardCallbackFull = type(
+        "WandbTaskRewardCallback",
+        (WandbTaskRewardCallback, TrainerCallback),
+        {},
+    )
+
     print(f"[VeriRL] base_model     = {config.base_model}")
     print(f"[VeriRL] env_url        = {config.env_url}")
     print(f"[VeriRL] output_repo    = {config.hf_output_repo}")
@@ -223,7 +241,7 @@ def run_training(
         processing_class=tokenizer,
         peft_config=peft_config,
         environment_factory=VerirlToolEnv,
-        callbacks=[WandbTaskRewardCallback()],
+        callbacks=[WandbTaskRewardCallbackFull()],
     )
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)

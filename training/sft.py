@@ -1,9 +1,8 @@
 """SFT warm-start on PyraNet-Verilog using Unsloth + TRL SFTTrainer.
 
-Requires the ``sft`` extra (torch, transformers 4.x, trl 0.x, unsloth).
-Note: unsloth is Linux/CUDA-only and therefore imported lazily inside
-``run_sft`` rather than at module level so this file remains importable
-on non-CUDA machines.
+Requires the ``sft`` extra (torch, transformers, trl, unsloth).
+Unsloth MUST be imported before trl/transformers/peft so its patches apply.
+The try/except keeps this file importable on non-CUDA machines (e.g. macOS).
 """
 
 from __future__ import annotations
@@ -11,6 +10,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
+try:
+    import unsloth  # noqa: F401 — must precede trl/transformers imports for patches to apply
+except ImportError:
+    pass
 
 import wandb as wb
 from datasets import load_dataset
@@ -26,18 +30,9 @@ SYSTEM_PROMPT = (
 def _format_example(example: dict, tokenizer) -> dict:
     """Format a single PyraNet-Verilog sample as a chat-template training string.
 
-    Filters out examples that have no description, no code, or a compilation
-    error in their metadata. Clean examples are formatted as a three-turn
-    conversation (system → user → assistant) and rendered with the tokenizer's
-    chat template so the model trains on the exact token sequence it generates.
-
-    Args:
-        example: A raw dataset row with ``description`` (JSON string) and ``code`` fields.
-        tokenizer: The tokenizer whose ``apply_chat_template`` formats the turns.
-
-    Returns:
-        ``{"text": <formatted string>}`` on success, or ``{"text": None}`` to
-        signal that the example should be filtered out.
+    Filters out examples with no description, no code, or compile errors.
+    Clean examples are formatted as a three-turn conversation
+    (system → user → assistant) rendered with the tokenizer's chat template.
     """
     try:
         meta = json.loads(example["description"])
@@ -123,8 +118,6 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     Returns:
         A dict with ``status``, ``output_repo``, and ``merged_repo`` keys.
     """
-    # Unsloth is Linux/CUDA-only; import lazily so this module stays importable
-    # on macOS and other non-CUDA environments.
     from unsloth import FastLanguageModel
 
     if wandb_key:
@@ -155,6 +148,8 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         random_state=42,
     )
 
+    tokenizer.model_max_length = config.sft_max_seq_length
+
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
     print(f"[SFT] base_model  = {config.sft_base_model}")
@@ -163,7 +158,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
         args=SFTConfig(
             output_dir=output_dir,
@@ -181,11 +176,10 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
             hub_token=hf_token,
             hub_strategy="every_save",
             report_to="wandb" if wandb_key else "none",
-            run_name="verirl-sft-qwen3-4b-thinking",
+            run_name="verirl-sft-qwen3-4b-tooluse",
             bf16=True,
             torch_compile=True,
             dataset_text_field="text",
-            max_seq_length=config.sft_max_seq_length,
             packing=True,
         ),
     )

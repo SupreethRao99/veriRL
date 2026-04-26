@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -98,8 +99,8 @@ _MODELS_RAW: list[tuple[str, str, list[str]]] = [
         ["--quantization", "bitsandbytes", "--load-format", "bitsandbytes"],
     ),
     (
-        "+ SFT",
-        "Supreeth/verirl-sft-qwen3-4b-thinking-merged",
+        "+ SFT (tool-use)",
+        "Supreeth/verirl-sft-qwen3-4b-tooluse-merged",
         [],
     ),
     (
@@ -161,7 +162,7 @@ def merge_grpo_adapter() -> None:
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    sft_base = "Supreeth/verirl-sft-qwen3-4b-thinking-merged"
+    sft_base = "Supreeth/verirl-sft-qwen3-4b-tooluse-merged"
     adapter  = "Supreeth/verirl-rlvr-qwen3-4b-thinking"
 
     print(f"[eval] Merging GRPO adapter {adapter} into {sft_base} ...", file=sys.stderr, flush=True)
@@ -277,20 +278,42 @@ def _fmt_obs(obs) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_action(text: str) -> VerirlAction:
-    t = text.strip()
+def _try_parse_json(t: str) -> "VerirlAction | None":
+    """Try to extract and parse the first JSON object from text. Returns None on failure."""
     for fence in ("```json", "```"):
         if fence in t:
             t = t.split(fence)[1].split("```")[0].strip()
             break
-    s, e = t.find("{"), t.rfind("}") + 1
-    if s >= 0 and e > s:
+    start = t.find("{")
+    if start >= 0:
         try:
-            data = json.loads(t[s:e])
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(t, start)
             valid = VerirlAction.model_fields
             return VerirlAction(**{k: v for k, v in data.items() if k in valid})
         except Exception:
             pass
+    return None
+
+
+def _parse_action(text: str) -> VerirlAction:
+    # Primary: strip Qwen3 thinking blocks and parse what remains.
+    # Models trained with enable_thinking=True (e.g. SFT) output:
+    #   <think>...</think>\n{"action_type": ...}
+    no_think = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    result = _try_parse_json(no_think)
+    if result is not None:
+        return result
+
+    # Fallback: search *inside* thinking blocks. Models trained with
+    # enable_thinking=False (e.g. GRPO) learned to output JSON directly; when
+    # served by vLLM with thinking enabled, the JSON ends up inside <think>.
+    think_parts = re.findall(r"<think>(.*?)</think>", text, flags=re.DOTALL)
+    for part in think_parts:
+        result = _try_parse_json(part)
+        if result is not None:
+            return result
+
     return VerirlAction(action_type="submit", message="parse error")
 
 
