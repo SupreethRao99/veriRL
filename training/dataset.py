@@ -1,4 +1,4 @@
-"""Dataset builder for GRPO training."""
+"""Dataset builder for GRPO curriculum training."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 from datasets import Dataset
 
 from training.config import TrainConfig
-from training.curriculum import ALL_TASKS, SYSTEM_PROMPT, sample_task
+from training.curriculum import ALL_TASKS, SYSTEM_PROMPT, TASKS_BY_DIFFICULTY
 
-# Map task_id → subdirectory name under problems/
+
 _TASK_DIRS: dict[str, str] = {
     "mac_unit":       "task1_mac",
     "axi_fifo":       "task2_axi_fifo",
@@ -26,18 +26,20 @@ _TASK_DIRS: dict[str, str] = {
 
 
 def _load_specs_from_disk() -> dict[str, str]:
-    """
-    Read spec.md for every task directly from the problems/ directory.
+    """Read ``spec.md`` for every task from the ``problems/`` directory.
 
-    Works whether we're running from the repo root or from an installed
-    package (problems/ is bundled as package data under verirl_env/).
+    Tries several candidate locations (installed package path, repository root,
+    parent of repository root) so the function works both when the package is
+    installed as a wheel and when run directly from the cloned repo.
+
+    Returns:
+        A dict mapping ``task_id`` → spec Markdown string. Tasks whose spec
+        file is not found are omitted; callers should supply fallback text.
     """
-    # Try repo-root layout first, then installed-package layout.
     candidates = [
-        Path(__file__).parent.parent / "problems",  # repo root
-        Path(__file__).parent.parent.parent / "problems",  # installed as verirl_env.training
+        Path(__file__).parent.parent / "problems",
+        Path(__file__).parent.parent.parent / "problems",
     ]
-    # Also try via the installed package's __file__
     try:
         import verirl_env as _ve  # type: ignore
         candidates.insert(0, Path(_ve.__file__).parent / "problems")
@@ -56,33 +58,70 @@ def _load_specs_from_disk() -> dict[str, str]:
     return specs
 
 
-def build_dataset(config: TrainConfig, n_samples: int = 2000) -> Dataset:
-    """
-    Build a HuggingFace Dataset of (prompt, task_id) pairs for GRPO.
+def build_dataset(config: TrainConfig, n_samples: int = 400) -> Dataset:
+    """Build a HuggingFace ``Dataset`` of ``(prompt, task_id)`` pairs for GRPO.
 
-    The task_id column is forwarded to VerirlToolEnv.reset() as a keyword
-    argument so every training sample targets a specific task.
+    Records are ordered easy → medium → hard so TRL trains on simpler tasks
+    first. The ordering is soft — GRPOTrainer may still sample non-sequentially
+    — but it biases the early training steps toward tractable tasks.
 
-    Specs are read from disk (problems/*/spec.md). If a spec file is missing
-    for a task, we fall back to a one-line placeholder.
+    With ``num_generations=2`` and ``per_device_train_batch_size=4``, TRL
+    consumes roughly ``max_steps * batch / num_generations`` unique prompts.
+    For ``max_steps=200`` that is ~400 unique prompts, so the default
+    ``n_samples=400`` gives one pass through the curriculum.
+
+    The ``task_id`` column is forwarded to ``VerirlToolEnv.reset()`` so every
+    sample targets a specific task rather than sampling randomly at runtime.
+
+    Args:
+        config: Training config supplying ``task_difficulty_weights`` and
+            ``task_ids`` (the allowed task subset).
+        n_samples: Total number of dataset rows to produce.
+
+    Returns:
+        A HuggingFace ``Dataset`` with ``prompt`` (list of chat messages) and
+        ``task_id`` (str) columns.
     """
     rng = random.Random(42)
 
     specs = _load_specs_from_disk()
-
-    # Fill in any missing tasks with a short fallback
     for task_id in ALL_TASKS:
         if task_id not in specs:
             specs[task_id] = f"Implement the {task_id} Verilog module."
 
+    weights = config.task_difficulty_weights
+    total_weight = sum(weights.values())
+
     records = []
-    for _ in range(n_samples):
-        task_id = sample_task(config, rng)
-        records.append({
+    for difficulty in ["easy", "medium", "hard"]:
+        w = weights.get(difficulty, 0.0)
+        n = round(n_samples * w / total_weight)
+        allowed_tasks = set(config.task_ids) if config.task_ids else None
+        tasks = TASKS_BY_DIFFICULTY[difficulty]
+        if allowed_tasks is not None:
+            tasks = [t for t in tasks if t in allowed_tasks]
+        if not tasks:
+            continue
+        for _ in range(n):
+            task_id = rng.choice(tasks)
+            records.append({
+                "prompt": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": f"TASK SPECIFICATION:\n{specs[task_id]}"},
+                ],
+                "task_id": task_id,
+            })
+
+    easy_tasks = config.task_ids or TASKS_BY_DIFFICULTY["easy"]
+    while len(records) < n_samples:
+        task_id = rng.choice(easy_tasks)
+        records.insert(0, {
             "prompt": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": f"TASK SPECIFICATION:\n{specs[task_id]}"},
             ],
             "task_id": task_id,
         })
+    records = records[:n_samples]
+
     return Dataset.from_list(records)

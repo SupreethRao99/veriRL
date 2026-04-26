@@ -13,6 +13,8 @@ tags:
 
 [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/raw/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/Supreeth/verirl-env)
 
+**[📖 Read the blog](BLOG.md)** &nbsp;·&nbsp; [📊 W&B Training Run](https://api.wandb.ai/links/supreethrao/cdpml221) &nbsp;·&nbsp; [🤗 SFT Checkpoint](https://huggingface.co/Supreeth/verirl-sft-qwen3-4b-thinking-merged) &nbsp;·&nbsp; [🤗 GRPO Checkpoint](https://huggingface.co/Supreeth/verirl-rlvr-qwen3-4b-thinking)
+
 An OpenEnv environment for training and evaluating language models on synthesizable Verilog RTL design. Agents implement hardware modules for AI-accelerator primitives and receive graded feedback from real EDA tools — not heuristics, not LLM judges.
 
 ## Overview
@@ -238,39 +240,70 @@ The final score (on `submit` or episode expiry) is the weighted EDA-tool score i
 
 ## RLVR Training
 
-VeriRL ships a full RLVR training stack for fine-tuning a code LLM using GRPO on Modal Labs A100 GPUs.
+VeriRL ships a full two-phase RLVR training stack (SFT warm-start → GRPO fine-tuning) targeting `Qwen3-4B-Thinking`.
 
-**Algorithm:** GRPO (Group Relative Policy Optimization) via TRL  
-**Model:** `Qwen/Qwen2.5-Coder-3B-Instruct` with QLoRA (NF4 4-bit, rank 64)  
-**Infrastructure:** Modal Labs A100-80GB, checkpoints volume, HF Hub push
+**Algorithm:** GRPO (Group Relative Policy Optimization) via TRL
+**Model:** `Qwen/Qwen3-4B-Thinking-2507` → SFT → GRPO with QLoRA (rank-1)
+**Infrastructure:** HuggingFace Jobs (primary) or Modal Labs (alternative)
 
-### Setup
+Training is split across two SFT/GRPO extras that pin incompatible TRL versions:
+
+| Phase | Extra | Script | Hardware |
+|-------|-------|--------|----------|
+| SFT warm-start | `sft` (TRL 0.x + Unsloth) | `training/hf_train_sft.py` | 1×A10G |
+| RLVR GRPO | `grpo` (TRL 1.x + vLLM) | `training/hf_train_grpo.py` | 2×A10G or 1×H200 |
+
+### HuggingFace Jobs (recommended)
 
 ```bash
-# Install training dependencies
-uv sync --extra training
+# One-time: log in and register your HF token
+huggingface-cli login
 
-# Deploy the VeriRL server (or point at a hosted HF Space)
-docker run -p 8000:8000 ghcr.io/SupreethRao99/veriRL:latest
+# Set the VeriRL env server URL (your deployed HF Space)
+export VERIRL_ENV_URL=https://<username>-verirl-env.hf.space
 
-# Create the Modal secret
+# Phase 1 — SFT warm-start
+python infra/hf_jobs.py sft
+
+# Phase 2 — RLVR GRPO (from SFT checkpoint)
+python infra/hf_jobs.py train
+
+# Monitor jobs
+python infra/hf_jobs.py ps
+python infra/hf_jobs.py logs <job-id>
+
+# Dry-run (print hf CLI command without submitting)
+python infra/hf_jobs.py --dry-run train
+```
+
+### Modal Labs (alternative)
+
+```bash
+# One-time: create the Modal secret
 modal secret create verirl-training \
     HF_TOKEN=hf_xxx \
     WANDB_API_KEY=wandb_xxx \
     VERIRL_ENV_URL=https://your-space.hf.space
+
+# Phase 1 — SFT warm-start (H100, ~8h)
+modal run infra/modal_infra.py::sft
+
+# Phase 2 — RLVR GRPO (2×L4, ~4h)
+modal run infra/modal_infra.py::train
+
+# Deploy the env server on Modal (no GPU needed)
+modal deploy infra/modal_env.py
 ```
 
-### Run training
+### Local smoke test
 
 ```bash
-# Standard QLoRA GRPO (recommended)
-modal run training/train.py
+# Start the VeriRL server locally
+uv run --project . server
 
-# With vLLM colocate mode (faster generation, higher memory)
-modal run training/train.py::train_vllm
-
-# Connectivity smoke test (no GPU, verifies env is reachable)
-modal run training/train.py::smoke_test
+# Verify env connectivity (no training extras required)
+export VERIRL_ENV_URL=http://localhost:8000
+python training/train.py --smoke
 ```
 
 ### Training configuration
@@ -280,21 +313,29 @@ All hyperparameters live in [`config.yaml`](config.yaml):
 ```yaml
 training:
   model:
-    base_model: Qwen/Qwen2.5-Coder-3B-Instruct
-    hf_output_repo: SupreethRao99/verirl-rlvr-qwen2.5-coder-3b
+    base_model: Supreeth/verirl-sft-qwen3-4b-thinking
+    vllm_base_model: Supreeth/verirl-sft-qwen3-4b-thinking-merged
+    hf_output_repo: Supreeth/verirl-rlvr-qwen3-4b-thinking
   grpo:
-    num_generations: 6       # G in GRPO
+    num_generations: 4        # G in GRPO
     max_steps: 500
-    learning_rate: 5.0e-6
-    kl_coeff: 0.05           # β — KL penalty
+    learning_rate: 5.0e-5
+    kl_coeff: 0.05            # β — KL penalty
+    reward_weights: [0.05, 0.25, 0.40, 0.30]  # tool, compile, sim, final
+  lora:
+    r: 1                      # rank-1: enough for RL signal, avoids over-regularisation
   curriculum:
     task_difficulty_weights:
-      easy: 0.40             # mac_unit, relu_clip, barrel_shifter
-      medium: 0.40           # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
-      hard: 0.20             # systolic_array, fp16_adder
+      easy: 0.40              # mac_unit, relu_clip, barrel_shifter
+      medium: 0.40            # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
+      hard: 0.20              # systolic_array, fp16_adder
 ```
 
 The curriculum sampler draws tasks weighted by difficulty bucket. Task specs are read from disk at dataset-build time — no server required for the training data pipeline.
+
+GPU strategy (auto-detected at runtime):
+- **2 GPUs**: vLLM server on GPU 1 (full 22 GB KV cache) + training on GPU 0
+- **1 GPU**: vLLM colocate mode (context capped at 8192 to avoid OOM)
 
 ## Setup
 
@@ -322,9 +363,13 @@ The curriculum sampler draws tasks weighted by difficulty bucket. Task specs are
 ### Install
 
 ```bash
-uv sync              # core runtime
+uv sync              # core runtime (server + inference)
 uv sync --extra dev  # + pytest, towncrier
+uv sync --extra sft  # + SFT training stack (Unsloth, TRL 0.x)
+uv sync --extra grpo # + GRPO training stack (TRL 1.x, vLLM)
 ```
+
+Note: `sft` and `grpo` have conflicting TRL version pins and cannot be installed together.
 
 ### Configuration
 
@@ -336,7 +381,7 @@ uv sync --extra dev  # + pytest, towncrier
 | `MODEL_NAME` | `Qwen/Qwen2.5-72B-Instruct` | Model to use for inference |
 | `ENV_BASE_URL` | `http://localhost:8000` | VeriRL server URL |
 | `VERIRL_PROBLEMS_DIR` | `<auto-detected>` | Override path to the `problems/` directory |
-| `VERIRL_ENV_URL` | `http://localhost:8000` | Environment URL for Modal training (set as Modal secret) |
+| `VERIRL_ENV_URL` | `http://localhost:8000` | Environment URL for training (set as HF secret or Modal secret) |
 
 ### Run the server
 
@@ -382,52 +427,57 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full workflow.
 
 ```
 verirl_env/
-├── config.yaml                      # Central configuration (server, inference, training, Modal)
-├── Makefile                         # Developer targets (serve, test, train, docker)
-├── pyproject.toml                   # Package metadata and dependencies
-├── inference.py                     # Baseline inference script
-├── models.py                        # VerirlAction, VerirlObservation, VerirlState
-├── client.py                        # WebSocket client (VerirlEnv)
+├── config.yaml                        # Central configuration (server, inference, training)
+├── pyproject.toml                     # Package metadata and dependencies
+├── inference.py                       # Baseline inference script
+├── models.py                          # VerirlAction, VerirlObservation, VerirlState
+├── client.py                          # WebSocket client (verirl_env)
+├── infra/
+│   ├── hf_jobs.py                     # HF Jobs submit CLI (sft / train / ps / logs)
+│   ├── modal_env.py                   # Modal deployment for the env server (CPU)
+│   ├── modal_infra.py                 # Modal Labs adapter (sft / train functions)
+│   └── modal_merge.py                 # Modal utility: merge SFT LoRA and push to Hub
 ├── problems/
-│   ├── task1_mac/                   # Pipelined MAC Unit (easy, 8 turns)
+│   ├── task1_mac/                     # Pipelined MAC Unit (easy, 8 turns)
 │   │   ├── spec.md
-│   │   ├── testbench.v              # 22 assertions
+│   │   ├── testbench.v                # 22 assertions
 │   │   └── reference.v
-│   ├── task2_axi_fifo/              # AXI-Stream FIFO (medium, 10 turns)
-│   ├── task3_systolic/              # 4×4 Systolic Array (hard, 12 turns)
-│   ├── task4_relu_clip/             # ReLU-Clip Unit (easy, 6 turns, formal)
-│   │   ├── spec.md
-│   │   ├── testbench.v
-│   │   ├── reference.v
-│   │   └── properties.sv            # SymbiYosys formal properties (6 assertions)
-│   ├── task5_barrel_shifter/        # Barrel Shifter (easy, 6 turns)
-│   ├── task6_register_file/         # Register File (medium, 8 turns, formal)
-│   │   └── properties.sv
-│   ├── task7_ring_buffer/           # Ring Buffer (medium, 10 turns)
-│   ├── task8_dot_product/           # INT8 Dot Product (medium, 8 turns)
-│   ├── task9_fir_filter/            # 3-Tap FIR Filter (medium, 10 turns)
-│   └── task10_fp16_adder/           # IEEE 754 FP16 Adder (hard, 15 turns, formal)
-│       └── properties.sv
+│   ├── task2_axi_fifo/                # AXI-Stream FIFO (medium, 10 turns)
+│   ├── task3_systolic/                # 4×4 Systolic Array (hard, 12 turns)
+│   ├── task4_relu_clip/               # ReLU-Clip Unit (easy, 6 turns, formal)
+│   │   └── properties.sv             # SymbiYosys formal properties (6 assertions)
+│   ├── task5_barrel_shifter/          # Barrel Shifter (easy, 6 turns)
+│   ├── task6_register_file/           # Register File (medium, 8 turns, formal)
+│   ├── task7_ring_buffer/             # Ring Buffer (medium, 10 turns)
+│   ├── task8_dot_product/             # INT8 Dot Product (medium, 8 turns)
+│   ├── task9_fir_filter/              # 3-Tap FIR Filter (medium, 10 turns)
+│   └── task10_fp16_adder/             # IEEE 754 FP16 Adder (hard, 15 turns, formal)
 ├── server/
-│   ├── app.py                       # FastAPI application (REST + WebSocket)
-│   ├── verirl_env_environment.py    # Environment logic (reset / step / grading)
-│   ├── evaluator.py                 # EDA tool wrappers (iverilog, yosys, sby)
+│   ├── app.py                         # FastAPI application (REST + WebSocket)
+│   ├── verirl_env_environment.py      # Environment logic (reset / step / grading)
+│   ├── evaluator.py                   # EDA tool wrappers (iverilog, yosys, sby)
 │   └── Dockerfile
 ├── training/
-│   ├── train.py                     # Modal entry point (GRPO training functions)
-│   ├── trainer.py                   # Model loading + GRPOTrainer setup
-│   ├── config.py                    # TrainConfig dataclass + YAML loading
-│   ├── curriculum.py                # Task sampling by difficulty + system prompt
-│   ├── dataset.py                   # GRPO dataset builder (reads specs from disk)
-│   ├── environment.py               # VerirlToolEnv for TRL environment_factory
-│   └── reward.py                    # reward_func for GRPOTrainer
+│   ├── config.py                      # SFTConfig + TrainConfig dataclasses + YAML loading
+│   ├── curriculum.py                  # Task difficulty buckets, sampling, system prompt
+│   ├── dataset.py                     # GRPO curriculum dataset builder
+│   ├── environment.py                 # VerirlToolEnv for TRL environment_factory
+│   ├── hf_train_grpo.py               # HF Jobs GRPO entry point (bootstraps + trains)
+│   ├── hf_train_sft.py                # HF Jobs SFT entry point (bootstraps + trains)
+│   ├── test_sft.py                    # SFT model sanity check (runs against Hub checkpoint)
+│   ├── reward.py                      # Four reward functions for GRPOTrainer
+│   ├── runtime.py                     # Shared utilities: vLLM server, env health check
+│   ├── sft.py                         # SFT training loop (backend-agnostic)
+│   ├── train.py                       # Local runner CLI (GRPO + smoke test)
+│   ├── trainer.py                     # Model loading + GRPO training loop (backend-agnostic)
+│   └── wandb_task_logging.py          # Per-task reward buffering for W&B
 └── tests/
-    ├── conftest.py                  # Shared fixtures (reference Verilog, EDA skips)
-    ├── test_environment.py          # Environment step/reset/reward tests
-    ├── test_evaluator.py            # EDA tool wrapper tests
-    ├── test_new_tasks.py            # Tests for tasks 4–10 (reset, compile, sim, grade)
-    ├── test_models.py               # Pydantic model tests
-    └── test_integration.py          # End-to-end server tests
+    ├── conftest.py                    # Shared fixtures (reference Verilog, EDA skips)
+    ├── test_environment.py            # Environment step/reset/reward tests
+    ├── test_evaluator.py              # EDA tool wrapper tests
+    ├── test_new_tasks.py              # Tests for tasks 4–10 (reset, compile, sim, grade)
+    ├── test_models.py                 # Pydantic model tests
+    └── test_integration.py            # End-to-end server tests
 ```
 
 ## Running Tests

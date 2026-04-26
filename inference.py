@@ -212,10 +212,10 @@ def parse_action(response_text: str) -> tuple[VerirlAction, Optional[str]]:
     elif "```" in text:
         text = text.split("```")[1].split("```")[0].strip()
     start = text.find("{")
-    end = text.rfind("}") + 1
-    if start >= 0 and end > start:
+    if start >= 0:
         try:
-            data = json.loads(text[start:end])
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(text, start)
             valid_fields = VerirlAction.model_fields
             return VerirlAction(**{k: v for k, v in data.items() if k in valid_fields}), None
         except Exception as exc:

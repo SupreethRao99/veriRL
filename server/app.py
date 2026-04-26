@@ -18,6 +18,8 @@ Endpoints:
     WS   /ws      — persistent WebSocket session (required for multi-step episodes)
     GET  /health  — liveness check
     GET  /tasks   — list available benchmark tasks (custom extension)
+    GET  /blog    — rendered HTML view of BLOG.md
+    GET  /blog/raw — raw BLOG.md markdown source
 
 Usage:
     # Development (with auto-reload):
@@ -30,6 +32,10 @@ Usage:
     uv run --project . server
 """
 
+from pathlib import Path
+
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from omegaconf import OmegaConf
 from pydantic import BaseModel
 
 # Support both in-repo and standalone imports
@@ -45,6 +51,16 @@ except ImportError:
 
     from models import VerirlAction, VerirlObservation
     from server.verirl_env_environment import _TASK_CONFIGS, VerirlEnvironment
+
+
+def _load_max_concurrent_envs() -> int:
+    for candidate in [
+        Path(__file__).parent.parent / "config.yaml",
+        Path("/root/verirl/config.yaml"),
+    ]:
+        if candidate.exists():
+            return int(OmegaConf.load(candidate).server.max_concurrent_envs)
+    return 64  # safe default if config not found
 
 
 class TaskInfo(BaseModel):
@@ -63,7 +79,7 @@ app = create_app(
     VerirlAction,
     VerirlObservation,
     env_name="verirl_env",
-    max_concurrent_envs=10,
+    max_concurrent_envs=_load_max_concurrent_envs(),
 )
 
 
@@ -80,6 +96,53 @@ def list_tasks():
         )
         for config in _TASK_CONFIGS
     ]
+
+
+_BLOG_PATH = Path(__file__).parent.parent / "BLOG.md"
+
+_BLOG_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VeriRL — Training Blog</title>
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-light.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+  <style>
+    body {{ box-sizing: border-box; min-width: 200px; max-width: 860px;
+            margin: 40px auto; padding: 0 24px; font-family: sans-serif; }}
+    .markdown-body img {{ max-width: 100%; }}
+  </style>
+</head>
+<body class="markdown-body">
+  <script>
+    const raw = {raw_json};
+    document.currentScript.insertAdjacentHTML('afterend', marked.parse(raw));
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/blog/raw", response_class=PlainTextResponse, tags=["Blog"])
+def blog_raw():
+    """Return the raw BLOG.md markdown source."""
+    if not _BLOG_PATH.exists():
+        return PlainTextResponse("Blog not found.", status_code=404)
+    return _BLOG_PATH.read_text(encoding="utf-8")
+
+
+@app.get("/blog", response_class=HTMLResponse, tags=["Blog"])
+def blog():
+    """Render BLOG.md as a styled HTML page."""
+    if not _BLOG_PATH.exists():
+        return HTMLResponse("<p>Blog not found.</p>", status_code=404)
+    import json
+    raw = _BLOG_PATH.read_text(encoding="utf-8")
+    html = _BLOG_HTML_TEMPLATE.format(raw_json=json.dumps(raw))
+    return HTMLResponse(html)
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):

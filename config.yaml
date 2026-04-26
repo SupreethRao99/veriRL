@@ -11,7 +11,7 @@
 server:
   host: "0.0.0.0"
   port: 8000
-  max_concurrent_envs: 10
+  max_concurrent_envs: 32   # per_device_batch_size(2) × grad_accum(4) × num_generations(2) = 16; doubled for headroom
 
 # ------------------------------------------------------------
 # Inference (inference.py)
@@ -37,79 +37,97 @@ inference:
     fp16_adder: 600
 
 # ------------------------------------------------------------
-# Training
+# SFT warm-start (run before RLVR)
+# ------------------------------------------------------------
+sft:
+  base_model: "Qwen/Qwen3-4B-Thinking-2507"
+  output_repo: "Supreeth/verirl-sft-qwen3-4b-thinking"
+  max_seq_length: 2048
+  num_train_epochs: 1
+  lora_r: 16
+  lora_alpha: 32
+  per_device_batch_size: 8
+  gradient_accumulation_steps: 4
+  warmup_steps: 100
+  max_steps: -1
+  learning_rate: 2.0e-4
+  save_steps: 500
+  max_samples: 50000   # out of 692K; filter to compile-clean only
+
+# ------------------------------------------------------------
+# Training (RLVR — starts from SFT checkpoint)
 # ------------------------------------------------------------
 training:
   # ── Model ──────────────────────────────────────────────────
   model:
-    base_model: "Qwen/Qwen2.5-Coder-3B-Instruct"
-    hf_output_repo: "SupreethRao99/verirl-rlvr-qwen2.5-coder-3b"
-    use_4bit: true          # QLoRA NF4 quantisation
+    base_model: "Supreeth/verirl-sft-qwen3-4b-thinking"
+    vllm_base_model: "Supreeth/verirl-sft-qwen3-4b-thinking-merged"  # merged SFT weights; vLLM cannot load PEFT adapters
+    hf_output_repo: "Supreeth/verirl-rlvr-qwen3-4b-thinking"
+    use_4bit: false         # 4B bf16 = ~8 GB; fits on one L4 — no need for QLoRA
 
   # ── GRPO hyper-parameters ──────────────────────────────────
   grpo:
     num_train_epochs: 3
-    learning_rate: 5.0e-6
-    per_device_train_batch_size: 1
-    gradient_accumulation_steps: 8
-    num_generations: 6          # G in GRPO — completions sampled per prompt
-    max_prompt_length: 1024
-    max_completion_length: 4096 # total tokens across all turns in one episode
+    learning_rate: 5.0e-5          # 10× the typical full fine-tuning LR (LoRA without Regret)
+    per_device_train_batch_size: 2
+    gradient_accumulation_steps: 4
+    num_generations: 2          # G in GRPO — completions sampled per prompt
+    max_completion_length: 512  # per-turn token budget (one action + reasoning)
+    max_model_length: 4096      # total episode context; enough for the focused ReLU-Clip run
     temperature: 0.8
     top_p: 0.95
     kl_coeff: 0.05              # β — KL penalty coefficient
-    max_steps: 500
-    save_steps: 100
-    logging_steps: 10
+    max_steps: 100
+    save_steps: 20
+    logging_steps: 1
     warmup_ratio: 0.05
     push_to_hub: true
+    # Reward weights align with: tool_use, compile, sim_tests, final_score
+    reward_weights: [0.05, 0.25, 0.40, 0.30]
 
   # ── LoRA / PEFT ────────────────────────────────────────────
+  # Rank-1 suffices for RL (policy gradient ~1 bit/episode << rank-1 capacity).
+  # α=32 with 1/r scaling keeps LR multiplier rank-independent.
+  # No dropout — adds noise that destabilises RL training.
   lora:
-    r: 64
-    lora_alpha: 128
-    target_modules:
-      - "q_proj"
-      - "k_proj"
-      - "v_proj"
-      - "o_proj"
-      - "gate_proj"
-      - "up_proj"
-      - "down_proj"
-    lora_dropout: 0.05
+    r: 1
+    lora_alpha: 32
+    target_modules: "all-linear"   # LoRA Without Regret: all-linear beats attention-only even at higher rank
+    lora_dropout: 0.0
     bias: "none"
 
   # ── Curriculum — weights need not sum to 1 ─────────────────
   curriculum:
+    task_ids: ["relu_clip"]  # single easy task for the 100-step reward-shaping run
     task_difficulty_weights:
-      easy: 0.40    # mac_unit, relu_clip, barrel_shifter
-      medium: 0.40  # axi_fifo, register_file, ring_buffer, dot_product, fir_filter
-      hard: 0.20    # systolic_array, fp16_adder
-
-  # ── Evolutionary GRPO ─────────────────────────────────────
-  # After (1 - phase_ratio) * max_steps individual rounds, the trainer
-  # switches to evolution prompts built from the top-K rollouts collected.
-  # Set phase_ratio: 0 to disable evolution entirely.
-  evolution:
-    phase_ratio: 0.20        # 20% of steps reserved for evolution phase
-    top_k: 2                 # top-K designs used per evolution prompt
-    score_threshold: 0.40    # min score to enter the evolution buffer
+      easy: 1.00    # relu_clip only for this focused run
+      medium: 0.00
+      hard: 0.00
 
   # ── Runtime ────────────────────────────────────────────────
   env_url: "http://localhost:8000"   # overridden by VERIRL_ENV_URL secret on Modal
-  dataset_n_samples: 2000
+  dataset_n_samples: 400
 
 # ------------------------------------------------------------
 # Modal infra
 # ------------------------------------------------------------
 modal:
   app_name: "verirl-rlvr"
-  python_version: "3.11"
-  gpu_type: "A100"
-  gpu_count: 1
-  gpu_size: "80GB"
+  python_version: "3.12"
+  gpu_type: "A10G"
+  gpu_count: 2      # 1 = colocate (vLLM+training share GPU); 2+ = server mode (vLLM on GPU 1)
+  gpu_size: "24GB"
   timeout: 14400   # 4 hours in seconds
-  memory: 65536    # MB
   checkpoints_dir: "/checkpoints"
   checkpoints_volume: "verirl-rlvr-checkpoints"
   secret_name: "verirl-training"
+
+# ------------------------------------------------------------
+# HF Jobs infra
+# ------------------------------------------------------------
+hfjobs:
+  github_repo: "SupreethRao99/veriRL"
+  github_branch: "main"
+  sft_flavor: "h200"      # 1×H200 (141 GB) — Unsloth SFT
+  grpo_flavor: "a10g-largex2"   # 2×A10G: vLLM server mode; swap for H200-large for single-card colocate
+  timeout: "8h"

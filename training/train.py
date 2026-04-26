@@ -1,192 +1,46 @@
-"""
-VeriRL RLVR Training — Modal entry point
-=========================================
-Fine-tunes Qwen2.5-Coder-3B-Instruct on all 10 VeriRL tasks using GRPO.
+"""Local GRPO training runner — no Modal or HF Jobs dependency.
 
-Architecture
-------------
-- Algorithm:   GRPO (TRL GRPOTrainer + environment_factory)
-- LoRA:        QLoRA rank-64, NF4 4-bit quantisation
-- Inference:   optional vLLM colocate mode for faster generation
-- Checkpoints: Modal Volume + HF Hub push
+For cloud training use ``modal_infra.py`` (Modal Labs) or ``hf_jobs.py``
+(HuggingFace Jobs) instead. This script is intended for local iteration and
+connectivity smoke tests.
 
-Setup
+Usage
 -----
-0. Install training deps locally (macOS-safe — vllm/trl[vllm] skipped on non-Linux):
-       uv sync --extra training
+  python training/train.py                # standard GRPO
+  python training/train.py --vllm        # + vLLM colocate mode
+  python training/train.py --smoke       # connectivity smoke test
 
-1. Deploy the VeriRL server (or use a hosted HF Space):
-       docker run -p 8000:8000 ghcr.io/SupreethRao99/veriRL:latest
-
-2. Create the Modal secret:
-       modal secret create verirl-training \\
-           HF_TOKEN=hf_xxx \\
-           WANDB_API_KEY=wandb_xxx \\
-           VERIRL_ENV_URL=https://your-space.hf.space
-
-3. Run:
-       modal run training/train.py              # standard QLoRA
-       modal run training/train.py::train_vllm  # + vLLM colocate
-       modal run training/train.py::smoke_test  # connectivity check (no GPU)
+Environment
+-----------
+  VERIRL_ENV_URL    URL of the running VeriRL environment server
+  HF_TOKEN          HuggingFace token (required for model download + hub push)
+  WANDB_API_KEY     Weights & Biases key (optional)
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import textwrap
-from pathlib import Path
 
-import modal
+from verirl_env import VerirlAction, verirl_env  # type: ignore
 
 from training.config import TrainConfig
-from training.trainer import build_grpo_config, run_training, setup_auth
-
-# ---------------------------------------------------------------------------
-# Modal app, image, volumes, secrets
-# ---------------------------------------------------------------------------
-
-app = modal.App("verirl-rlvr")
-
-# Build the training image.
-# - uv_pip_install installs the full dep set (always Linux in the container).
-# - add_local_python_source copies training/ into the image so `import training`
-#   resolves inside the container.
-training_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .uv_pip_install(
-        "torch==2.3.1",
-        "trl[vllm]==0.28.0",
-        "vllm==0.12.0",
-        "transformers==4.57",
-        "peft>=0.12.0",
-        "accelerate>=0.33.0",
-        "bitsandbytes>=0.43.3",
-        "omegaconf>=2.3.0",
-        "openenv-core[core]>=0.2.2",
-        "python-dotenv>=1.0.0",
-        "wandb>=0.17.0",
-        "huggingface_hub>=0.24.0",
-        "datasets>=3.5.1",
-        "numpy",
-    )
-    # Install the full repo as a package so Modal gets the current branch's
-    # code (10 tasks, multi-file, formal) rather than the stale PyPI release.
-    .add_local_python_source(".")
-    .add_local_python_source("training")
-    .env({"TOKENIZERS_PARALLELISM": "false"})
-)
-
-verirl_secrets = modal.Secret.from_name("verirl-training")
-
-CHECKPOINTS_DIR = Path("/checkpoints")
-checkpoints_volume = modal.Volume.from_name(
-    "verirl-rlvr-checkpoints", create_if_missing=True
-)
-
-# Shared decorator kwargs to avoid duplication across training functions
-_GPU_KWARGS = dict(
-    image=training_image,
-    gpu=modal.gpu.A100(count=1, size="80GB"),
-    timeout=4 * 3600,
-    secrets=[verirl_secrets],
-    volumes={str(CHECKPOINTS_DIR): checkpoints_volume},
-    memory=65536,
-)
-
-# ---------------------------------------------------------------------------
-# Training functions
-# ---------------------------------------------------------------------------
 
 
-@app.function(**_GPU_KWARGS)
-def train() -> dict:
-    """Standard QLoRA GRPO training on a single A100-80GB."""
-    hf_token, wandb_key = setup_auth()
-    config = TrainConfig.from_yaml(
-        env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
-    )
-    grpo_config = build_grpo_config(
-        config, hf_token, wandb_key, output_dir=str(CHECKPOINTS_DIR)
-    )
-    return run_training(config, grpo_config, hf_token, str(CHECKPOINTS_DIR / "final"))
+def _smoke_test() -> dict:
+    """Run a minimal write→compile→simulate→submit episode against the env server.
 
+    Connects to ``VERIRL_ENV_URL`` (default ``http://localhost:8000``), resets
+    the ``relu_clip`` task, writes a known-good implementation, runs the full
+    tool loop, and returns the final score. Useful for verifying that the
+    environment server is reachable and grading correctly before a training run.
 
-@app.function(**_GPU_KWARGS)
-def train_evolutionary() -> dict:
+    Returns:
+        A dict with ``status`` and ``relu_clip_score`` keys.
     """
-    Two-phase evolutionary GRPO training on a single A100-80GB.
-
-    Phase 1 — Individual GRPO (80% of steps):
-        Standard GRPO on individual task prompts. High-scoring completions
-        are accumulated in the evolution buffer (threshold set in config.yaml).
-
-    Phase 2 — Evolution GRPO (20% of steps):
-        The model receives prompts showing its own top-K previous designs
-        with their EDA scores and must synthesise an improved evolved design.
-        This trains the model to reason about design quality and perform
-        ShinkaEvolve-style genetic improvement in a single forward pass.
-
-    Run with:
-        modal run training/train.py::train_evolutionary
-    """
-    hf_token, wandb_key = setup_auth()
-    config = TrainConfig.from_yaml(
-        env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
-    )
-    grpo_config = build_grpo_config(
-        config, hf_token, wandb_key,
-        output_dir=str(CHECKPOINTS_DIR),
-        run_name="verirl-evolutionary-grpo-qwen2.5-coder-3b",
-    )
-    return run_training(config, grpo_config, hf_token, str(CHECKPOINTS_DIR / "final"))
-
-
-@app.function(**_GPU_KWARGS)
-def train_vllm() -> dict:
-    """
-    QLoRA GRPO training with vLLM colocate mode for faster generation.
-
-    vLLM runs inside the trainer process and shares GPU memory with the model,
-    improving generation throughput at the cost of higher peak memory usage.
-    """
-    # Required environment variables for vLLM colocate mode
-    os.environ.update({
-        "RANK":        "0",
-        "LOCAL_RANK":  "0",
-        "WORLD_SIZE":  "1",
-        "MASTER_ADDR": "localhost",
-        "MASTER_PORT": "12355",
-    })
-
-    hf_token, wandb_key = setup_auth()
-    config = TrainConfig.from_yaml(
-        env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
-    )
-    grpo_config = build_grpo_config(
-        config, hf_token, wandb_key,
-        output_dir=str(CHECKPOINTS_DIR),
-        use_vllm=True,
-        vllm_mode="colocate",
-    )
-    return run_training(config, grpo_config, hf_token, str(CHECKPOINTS_DIR / "final"))
-
-
-# ---------------------------------------------------------------------------
-# Smoke test — verifies connectivity and one manual episode, no GPU needed
-# ---------------------------------------------------------------------------
-
-
-@app.function(
-    image=training_image,
-    timeout=300,
-    secrets=[verirl_secrets],
-)
-def smoke_test() -> dict:
-    """Validate env connectivity and a complete write→compile→sim→submit episode."""
-    from verirl_env import VerirlAction, verirl_env  # type: ignore
-
     env_url = os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
-    print(f"[smoke_test] Connecting to VeriRL at {env_url}")
+    print(f"[smoke_test] Connecting to {env_url}")
 
     simple_verilog = textwrap.dedent("""
         module relu_clip #(parameter IN_W=8, parameter OUT_W=4) (
@@ -208,17 +62,12 @@ def smoke_test() -> dict:
     try:
         result = env.reset(task_id="relu_clip")
         print(f"[smoke_test] task_spec length: {len(result.observation.task_spec)}")
-
-        env.step(VerirlAction(
-            action_type="write_file", filename="design.v", verilog_src=simple_verilog
-        ))
+        env.step(VerirlAction(action_type="write_file", filename="design.v", verilog_src=simple_verilog))
         result = env.step(VerirlAction(action_type="run_compile"))
         print(f"[smoke_test] compile_ok={result.observation.compile_ok}")
-
         result = env.step(VerirlAction(action_type="run_sim"))
         obs = result.observation
         print(f"[smoke_test] sim: {obs.tests_passed}/{obs.tests_total} tests passed")
-
         result = env.step(VerirlAction(action_type="submit"))
         score = float(result.observation.final_score or 0.0)
         print(f"[smoke_test] final_score={score:.3f}")
@@ -229,25 +78,38 @@ def smoke_test() -> dict:
     return {"status": "ok", "relu_clip_score": score}
 
 
-# ---------------------------------------------------------------------------
-# Local entry point
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="VeriRL RLVR training")
-    parser.add_argument("--smoke",        action="store_true", help="Run smoke test (no GPU)")
-    parser.add_argument("--vllm",         action="store_true", help="Use vLLM colocate mode")
-    parser.add_argument("--evolutionary", action="store_true", help="Two-phase evolutionary GRPO")
+    parser = argparse.ArgumentParser(description="VeriRL local training runner")
+    parser.add_argument("--smoke",      action="store_true", help="Run connectivity smoke test")
+    parser.add_argument("--vllm",       action="store_true", help="Enable vLLM colocate mode")
+    parser.add_argument("--output-dir", default="./checkpoints", help="Checkpoint output directory")
     args = parser.parse_args()
 
-    with app.run():
-        if args.smoke:
-            print(smoke_test.remote())
-        elif args.vllm:
-            print(train_vllm.remote())
-        elif args.evolutionary:
-            print(train_evolutionary.remote())
-        else:
-            print(train.remote())
+    if args.smoke:
+        print(_smoke_test())
+    else:
+        # Imported here because training.trainer requires the grpo extra
+        # (torch, transformers ≥ 5, trl ≥ 1, peft). The smoke test above
+        # intentionally avoids those imports so it works without training extras.
+        from training.trainer import build_grpo_config, run_training, setup_auth
+
+        hf_token, wandb_key = setup_auth()
+        config = TrainConfig.from_yaml(
+            env_url=os.environ.get("VERIRL_ENV_URL", "http://localhost:8000")
+        )
+
+        extra = {}
+        if args.vllm:
+            os.environ.update({
+                "RANK": "0", "LOCAL_RANK": "0", "WORLD_SIZE": "1",
+                "MASTER_ADDR": "localhost", "MASTER_PORT": "12355",
+            })
+            extra = {"use_vllm": True, "vllm_mode": "colocate"}
+
+        grpo_config = build_grpo_config(
+            config, hf_token, wandb_key,
+            output_dir=args.output_dir,
+            **extra,
+        )
+        result = run_training(config, grpo_config, hf_token, f"{args.output_dir}/final")
+        print(result)
