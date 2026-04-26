@@ -319,7 +319,15 @@ async def run_episode(task_id: str, served_model: str, llm: OpenAI) -> float:
                 action = VerirlAction(action_type="submit", message="time budget exceeded")
             else:
                 try:
-                    resp = llm.chat.completions.create(model=served_model, messages=messages)
+                    resp = llm.chat.completions.create(
+                        model=served_model,
+                        messages=messages,
+                        max_tokens=512,
+                        # Disable Qwen3 thinking mode — we need clean JSON output.
+                        # Without this, <think> blocks break JSON extraction and long
+                        # reasoning causes WebSocket keepalive timeouts on the HF Space.
+                        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                    )
                     text = resp.choices[0].message.content or ""
                     action = _parse_action(text)
                     messages.append({"role": "assistant", "content": text})
