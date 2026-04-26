@@ -1,3 +1,21 @@
+## [0.7.0] - 2026-04-26
+
+Features
+~~~~~~~~
+
+- Added training blog (BLOG.md) documenting the full SFT → GRPO pipeline, reward design, W&B results, training plots, and frontier model baseline comparison. (blog)
+- Added /blog and /blog/raw endpoints to the server so the training blog is accessible directly from the HuggingFace Space. (blog-route)
+- Added HF Jobs evaluation script (training/hf_eval_models.py) and `hf_jobs.py eval` command for comparing Base vs SFT vs GRPO model performance on easy VeriRL tasks. (grpo-eval)
+
+Bug Fixes
+~~~~~~~~~
+
+- Fixed inference.py JSON parser to use json.JSONDecoder.raw_decode() instead of rfind('}'), preventing "Extra data" errors when the model outputs multiple JSON objects in one response. (inference-parser)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+-  (grpo-fast-curriculum, grpo-shaped-rewards, grpo-wandb-hfjobs, training-refactor, grpo-relu-clip-100)
 ## [0.6.0] - 2026-04-22
 
 Features
