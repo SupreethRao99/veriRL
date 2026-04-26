@@ -203,6 +203,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
+        max_seq_length=config.sft_max_seq_length,  # TRL 0.15+: on SFTTrainer, not SFTConfig
         args=SFTConfig(
             output_dir=output_dir,
             per_device_train_batch_size=config.sft_per_device_batch_size,
@@ -219,11 +220,10 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
             hub_token=hf_token,
             hub_strategy="every_save",
             report_to="wandb" if wandb_key else "none",
-            run_name="verirl-sft-qwen3-4b-thinking",
+            run_name="verirl-sft-qwen3-4b-tooluse",
             bf16=True,
             torch_compile=True,
             dataset_text_field="text",
-            max_seq_length=config.sft_max_seq_length,
             packing=True,
         ),
     )
