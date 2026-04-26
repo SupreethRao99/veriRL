@@ -7,7 +7,7 @@
 #   "accelerate>=0.33.0",
 #   "bitsandbytes>=0.43.3",
 #   "openai>=1.0.0",
-#   "openenv-verirl_env>=0.5.0",
+#   "openenv-core[core]>=0.2.2",
 #   "huggingface_hub>=0.24.0",
 #   "requests",
 #   "python-dotenv",
