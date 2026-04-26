@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -278,15 +279,18 @@ def _fmt_obs(obs) -> str:
 
 
 def _parse_action(text: str) -> VerirlAction:
-    t = text.strip()
+    # Strip Qwen3 thinking blocks — model may emit <think>...</think> even when
+    # enable_thinking=False is not honoured by the vLLM version in use.
+    t = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     for fence in ("```json", "```"):
         if fence in t:
             t = t.split(fence)[1].split("```")[0].strip()
             break
-    s, e = t.find("{"), t.rfind("}") + 1
-    if s >= 0 and e > s:
+    start = t.find("{")
+    if start >= 0:
         try:
-            data = json.loads(t[s:e])
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(t, start)
             valid = VerirlAction.model_fields
             return VerirlAction(**{k: v for k, v in data.items() if k in valid})
         except Exception:
