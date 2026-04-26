@@ -1,9 +1,8 @@
 """SFT warm-start on PyraNet-Verilog using Unsloth + TRL SFTTrainer.
 
-Requires the ``sft`` extra (torch, transformers 4.x, trl 0.x, unsloth).
-Note: unsloth is Linux/CUDA-only and therefore imported lazily inside
-``run_sft`` rather than at module level so this file remains importable
-on non-CUDA machines.
+Requires the ``sft`` extra (torch, transformers, trl, unsloth).
+Unsloth MUST be imported before trl/transformers/peft so its patches apply.
+The try/except keeps this file importable on non-CUDA machines (e.g. macOS).
 """
 
 from __future__ import annotations
@@ -11,6 +10,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
+try:
+    import unsloth  # noqa: F401 — must precede trl/transformers imports for patches to apply
+except ImportError:
+    pass
 
 import wandb as wb
 from datasets import load_dataset
@@ -161,9 +165,6 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     Returns:
         A dict with ``status``, ``output_repo``, and ``merged_repo`` keys.
     """
-    # Unsloth is Linux/CUDA-only; import lazily so this module stays importable
-    # on macOS and other non-CUDA environments.
-    from transformers import AutoTokenizer
     from unsloth import FastLanguageModel
 
     if wandb_key:
@@ -195,16 +196,6 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     )
 
     tokenizer.model_max_length = config.sft_max_seq_length
-    # Unsloth replaces eos_token as a class-level property on Qwen2Tokenizer,
-    # making every instance return '<EOS_TOKEN>' (not in Qwen3 vocab). TRL 0.24
-    # validates this unconditionally. Restore the standard SpecialTokensMixin
-    # property on the class, then set the correct eos_token via the normal setter.
-    from transformers.tokenization_utils_base import SpecialTokensMixin
-    sft_tokenizer = AutoTokenizer.from_pretrained(
-        config.sft_base_model, token=hf_token, model_max_length=config.sft_max_seq_length
-    )
-    type(sft_tokenizer).eos_token = SpecialTokensMixin.__dict__["eos_token"]
-    sft_tokenizer.eos_token = "<|im_end|>"
 
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
@@ -214,7 +205,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
 
     trainer = SFTTrainer(
         model=model,
-        processing_class=sft_tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
         args=SFTConfig(
             output_dir=output_dir,
@@ -236,7 +227,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
             bf16=True,
             torch_compile=True,
             dataset_text_field="text",
-            packing=False,  # packing=True triggers Unsloth/TRL 0.24 eos_token conflict
+            packing=True,
         ),
     )
 
