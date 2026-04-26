@@ -17,27 +17,47 @@ from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
 
 
-SYSTEM_PROMPT = (
-    "You are an expert RTL hardware designer. "
-    "Write correct, synthesizable Verilog modules given a functional description."
-)
+SYSTEM_PROMPT = """\
+You are an expert RTL hardware designer. Implement the given Verilog specification correctly.
+
+REQUIRED WORKFLOW — follow this sequence every episode:
+  1. write_file   — write a complete, synthesizable Verilog module.
+                    For multi-module designs use separate files:
+                    {"action_type": "write_file", "filename": "pe.v", "verilog_src": "..."}
+                    {"action_type": "write_file", "filename": "top.v", "verilog_src": "..."}
+  2. run_compile  — check all files for syntax errors; fix with write_file if needed
+  3. run_sim      — run the testbench; read every PASS/FAIL line; fix failures with write_file
+  4. (optional) run_formal — check formal properties if available; fix any counterexamples
+  5. (optional) run_synth  — check area against reference cell count
+  6. submit       — only after attempting compile and sim
+
+NEVER submit without first running run_compile and run_sim.
+
+Available actions — respond with exactly one JSON object, no markdown:
+  {"action_type": "write_file", "filename": "design.v", "verilog_src": "<full module>", "message": "..."}
+  {"action_type": "run_compile", "message": "checking syntax"}
+  {"action_type": "run_sim",     "message": "running testbench"}
+  {"action_type": "run_synth",   "message": "checking area"}
+  {"action_type": "run_formal",  "message": "checking formal properties"}
+  {"action_type": "list_files",  "message": "show written files"}
+  {"action_type": "submit",      "message": "final submission"}
+
+Design rules:
+- No `initial` blocks in the design module (testbench only)
+- Use always @(posedge clk) for sequential logic
+- Fully combinational modules: use assign or always @(*)
+- Pay close attention to pipeline depth, pipeline registers, and timing requirements
+- For tasks requiring multiple modules: use separate write_file calls with different filenames"""
 
 
 def _format_example(example: dict, tokenizer) -> dict:
-    """Format a single PyraNet-Verilog sample as a chat-template training string.
+    """Format a PyraNet-Verilog sample as a tool-use conversation.
 
-    Filters out examples that have no description, no code, or a compilation
-    error in their metadata. Clean examples are formatted as a three-turn
-    conversation (system → user → assistant) and rendered with the tokenizer's
-    chat template so the model trains on the exact token sequence it generates.
+    Each example becomes a single write_file action so the model learns the
+    JSON action format during SFT. GRPO then only needs to teach iteration
+    from EDA feedback rather than the action format from scratch.
 
-    Args:
-        example: A raw dataset row with ``description`` (JSON string) and ``code`` fields.
-        tokenizer: The tokenizer whose ``apply_chat_template`` formats the turns.
-
-    Returns:
-        ``{"text": <formatted string>}`` on success, or ``{"text": None}`` to
-        signal that the example should be filtered out.
+    Filters out examples with no description, no code, or compile errors.
     """
     try:
         meta = json.loads(example["description"])
@@ -55,10 +75,28 @@ def _format_example(example: dict, tokenizer) -> dict:
     if not code:
         return {"text": None}
 
+    # Infer a sensible filename from the module declaration; fall back to design.v
+    filename = "design.v"
+    for line in code.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("module "):
+            parts = stripped.split()
+            if len(parts) >= 2:
+                mod_name = parts[1].split("(")[0].strip()
+                if mod_name:
+                    filename = f"{mod_name}.v"
+            break
+
+    action = json.dumps(
+        {"action_type": "write_file", "filename": filename, "verilog_src": code,
+         "message": "implementing the module"},
+        ensure_ascii=False,
+    )
+
     messages = [
         {"role": "system",    "content": SYSTEM_PROMPT},
         {"role": "user",      "content": description},
-        {"role": "assistant", "content": code},
+        {"role": "assistant", "content": action},
     ]
     return {
         "text": tokenizer.apply_chat_template(

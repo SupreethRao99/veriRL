@@ -41,18 +41,18 @@ inference:
 # ------------------------------------------------------------
 sft:
   base_model: "Qwen/Qwen3-4B-Thinking-2507"
-  output_repo: "Supreeth/verirl-sft-qwen3-4b-thinking"
-  max_seq_length: 2048
+  output_repo: "Supreeth/verirl-sft-qwen3-4b-tooluse"
+  max_seq_length: 4096   # tool-use JSON format is longer than raw Verilog
   num_train_epochs: 1
   lora_r: 16
   lora_alpha: 32
-  per_device_batch_size: 8
+  per_device_batch_size: 16  # H200 141 GB vs H100 80 GB — doubled
   gradient_accumulation_steps: 4
   warmup_steps: 100
   max_steps: -1
   learning_rate: 2.0e-4
   save_steps: 500
-  max_samples: 50000   # out of 692K; filter to compile-clean only
+  max_samples: 100000  # out of 692K; filter to compile-clean only
 
 # ------------------------------------------------------------
 # Training (RLVR — starts from SFT checkpoint)
@@ -60,8 +60,8 @@ sft:
 training:
   # ── Model ──────────────────────────────────────────────────
   model:
-    base_model: "Supreeth/verirl-sft-qwen3-4b-thinking"
-    vllm_base_model: "Supreeth/verirl-sft-qwen3-4b-thinking-merged"  # merged SFT weights; vLLM cannot load PEFT adapters
+    base_model: "Supreeth/verirl-sft-qwen3-4b-tooluse"
+    vllm_base_model: "Supreeth/verirl-sft-qwen3-4b-tooluse-merged"  # merged SFT weights; vLLM cannot load PEFT adapters
     hf_output_repo: "Supreeth/verirl-rlvr-qwen3-4b-thinking"
     use_4bit: false         # 4B bf16 = ~8 GB; fits on one L4 — no need for QLoRA
 

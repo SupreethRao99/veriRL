@@ -103,8 +103,8 @@ app = modal.App("verirl-rlvr")
 
 @app.function(
     image=sft_image,
-    gpu="H100",
-    timeout=8 * 3600,
+    gpu="H200",
+    timeout=4 * 3600,
     secrets=_SECRETS,
     volumes=_VOLUMES,
     memory=65536,
