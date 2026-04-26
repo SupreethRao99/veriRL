@@ -173,56 +173,22 @@ The GRPO rollout is multi-turn: the model can call up to 15 tools in a single ep
 
 ### Score Comparison: Base → SFT → GRPO
 
-<!-- INSERT: Score table
-| Task | Difficulty | Base Qwen3-4B | + SFT | + GRPO |
-|------|-----------|--------------|-------|--------|
-| MAC unit | Easy | ?? | ?? | ?? |
-| ReLU-Clip | Easy | ?? | ?? | ?? |
-| Barrel Shifter | Easy | ?? | ?? | ?? |
-| AXI-Stream FIFO | Medium | ?? | ?? | ?? |
-| Register File | Medium | ?? | ?? | ?? |
-| Ring Buffer | Medium | ?? | ?? | ?? |
-| Dot Product | Medium | ?? | ?? | ?? |
-| FIR Filter | Medium | ?? | ?? | ?? |
-| Systolic Array | Hard | ?? | ?? | ?? |
-| FP16 Adder | Hard | ?? | ?? | ?? |
-| **Mean** | | **??** | **??** | **??** |
+Evaluation on the three easy tasks, 3 runs each, scored by the live VeriRL environment (real EDA tools):
 
-Scores are weighted EDA-tool scores ∈ [0.01, 0.99]. Each cell is the mean over 5 runs with different seeds.
--->
+| Task | Base (Qwen3-4B-Thinking) | + SFT | + GRPO |
+|------|--------------------------|-------|--------|
+| MAC unit (easy) | 0.010 | 0.010 | 0.010 |
+| ReLU-Clip (easy) | 0.010 | 0.010 | **0.367** |
+| Barrel Shifter (easy) | 0.010 | 0.010 | **0.271** |
+| **Mean** | **0.010** | **0.010** | **0.216** |
 
-### Before and After: A Concrete Example
+*Scores are weighted EDA-tool scores ∈ [0.01, 0.99] (compile 25%, simulation 40%, timing/area 35%). Each cell is the mean of 3 independent episodes. Full run: [W&B report](https://api.wandb.ai/links/supreethrao/cdpml221).*
 
-To make the numbers concrete, here is what the model's output looks like on the same task at each stage.
+**Reading the table.** The base model and SFT checkpoint both score at the floor (0.01). This is expected, and the reason is architectural rather than capability: both models output plain text or raw Verilog when prompted, not the JSON tool-use actions the environment requires (`{"action_type": "write_file", ...}`). They were never trained in the tool-loop format. Their scores reflect a failure to interact with the environment, not a failure to write Verilog.
 
-**Task**: Implement a pipelined MAC unit with 4-cycle latency, 8-bit inputs, 32-bit accumulator.
+The GRPO model learned the tool-use workflow during RL training — it is the only checkpoint that actually writes Verilog and submits it through the evaluation pipeline. Its scores reflect real hardware design capability: **0.367 on ReLU-Clip** (the task it was trained on) and **0.271 on Barrel Shifter** (a task it never saw during training). The MAC unit scores 0.01 because it requires a pipelined design with multi-cycle timing — a harder structural pattern that single-task GRPO on ReLU-Clip did not teach.
 
-<!-- INSERT: Before/after qualitative example
-**Base model (zero-shot)** — score: ??.??
-```verilog
-// [PASTE BASE MODEL OUTPUT HERE]
-```
-EDA feedback: `[PASTE IVERILOG / VVP OUTPUT HERE]`
-
----
-
-**After SFT** — score: ??.??
-```verilog
-// [PASTE SFT MODEL OUTPUT HERE]
-```
-EDA feedback: `[PASTE IVERILOG / VVP OUTPUT HERE]`
-
----
-
-**After GRPO** — score: ??.??
-```verilog
-// [PASTE GRPO MODEL OUTPUT HERE]
-```
-EDA feedback: `[PASTE IVERILOG / VVP OUTPUT HERE]`
--->
-
-The progression illustrates the two phases doing different work: SFT fixes the structure (the module compiles, the port list is correct, the logic is plausible), and GRPO fixes the behavior (the pipeline stages are right, the accumulator resets correctly, the timing assertions pass).
-
+This result illustrates why the SFT phase alone is insufficient: SFT teaches the model what correct Verilog looks like, but only GRPO — by running actual episodes in the environment — teaches it *how to interact* with EDA tools and *when to submit*.
 ---
 
 ## What We Learned
@@ -260,7 +226,7 @@ Or live on [HuggingFace Spaces](https://huggingface.co/spaces/Supreeth/verirl-en
 **Resources:**
 - GitHub: [SupreethRao99/veriRL](https://github.com/SupreethRao99/veriRL)
 - SFT checkpoint: [`Supreeth/verirl-sft-qwen3-4b-thinking-merged`](https://huggingface.co/Supreeth/verirl-sft-qwen3-4b-thinking-merged)
-- GRPO checkpoint: `Supreeth/verirl-grpo-qwen3-4b` <!-- UPDATE when available -->
+- GRPO checkpoint (LoRA adapter): [`Supreeth/verirl-rlvr-qwen3-4b-thinking`](https://huggingface.co/Supreeth/verirl-rlvr-qwen3-4b-thinking)
 - W&B training run: [VeriRL GRPO (ReLU CLIP)](https://api.wandb.ai/links/supreethrao/cdpml221)
 
 ---
