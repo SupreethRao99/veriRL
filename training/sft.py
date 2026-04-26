@@ -194,14 +194,15 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         random_state=42,
     )
 
-    # Use Unsloth tokenizer for apply_chat_template (dataset formatting) but
-    # pass a plain AutoTokenizer to SFTTrainer: Unsloth freezes eos_token to a
-    # placeholder that TRL 0.24 rejects during its unconditional eos validation.
-    # Both tokenizers share the same Qwen3 vocabulary so tokenization is identical.
     tokenizer.model_max_length = config.sft_max_seq_length
+    # Unsloth patches Qwen2Tokenizer at class level, making eos_token return
+    # '<EOS_TOKEN>' which is not in the Qwen3 vocabulary. TRL 0.24 validates
+    # this unconditionally. Bypass by setting the underlying _eos_token attribute
+    # that the SpecialTokensMixin property reads from, skipping any overrides.
     sft_tokenizer = AutoTokenizer.from_pretrained(
         config.sft_base_model, token=hf_token, model_max_length=config.sft_max_seq_length
     )
+    sft_tokenizer._eos_token = "<|im_end|>"
 
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
