@@ -121,7 +121,7 @@ def sft() -> dict:
 
     hf_token, wandb_key = setup_auth()
     config = SFTConfig.from_yaml()
-    return run_sft(config, hf_token, wandb_key, output_dir=f"{CHECKPOINTS_DIR}/sft")
+    return run_sft(config, hf_token, wandb_key, output_dir=f"{CHECKPOINTS_DIR}/sft-tooluse")
 
 
 # ---------------------------------------------------------------------------

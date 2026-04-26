@@ -201,7 +201,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,  # TRL 0.15+: renamed from tokenizer
         train_dataset=dataset,
         max_seq_length=config.sft_max_seq_length,  # TRL 0.15+: on SFTTrainer, not SFTConfig
         args=SFTConfig(
