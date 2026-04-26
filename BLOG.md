@@ -162,7 +162,7 @@ The GRPO rollout is multi-turn: the model can call up to 15 tools in a single ep
 
 ### Training Dynamics
 
-**Full training run**: [VeriRL GRPO (ReLU CLIP) — W&B Report](https://api.wandb.ai/links/supreethrao/cdpml221)
+**Full training run**: [VeriRL GRPO (ReLU CLIP) — W&B Report](https://api.wandb.ai/links/supreethrao/cdpml221) · [Raw run logs](https://wandb.ai/supreethrao/verirl-grpo/runs/zn6azp6t?nw=nwusersupreethrao)
 
 ![Composite reward over 100 GRPO training steps on ReLU-Clip](docs/plots/relu_clip-combined.png)
 *Composite reward (weighted sum of tool, compile, sim, and final components) over 100 GRPO training steps on the ReLU-Clip task. Three phases are visible: early exploration (~steps 0–15, reward ~0.27), a learning phase peaking at ~0.65 around step 35–40, and a stabilized plateau of ~0.42–0.45 for the remainder of training — a ~70% relative improvement over the starting baseline.*
@@ -229,7 +229,8 @@ Or live on [HuggingFace Spaces](https://huggingface.co/spaces/Supreeth/verirl-en
 - GitHub: [SupreethRao99/veriRL](https://github.com/SupreethRao99/veriRL)
 - SFT checkpoint: [`Supreeth/verirl-sft-qwen3-4b-thinking-merged`](https://huggingface.co/Supreeth/verirl-sft-qwen3-4b-thinking-merged)
 - GRPO checkpoint (LoRA adapter): [`Supreeth/verirl-rlvr-qwen3-4b-thinking`](https://huggingface.co/Supreeth/verirl-rlvr-qwen3-4b-thinking)
-- W&B training run: [VeriRL GRPO (ReLU CLIP)](https://api.wandb.ai/links/supreethrao/cdpml221)
+- W&B report: [VeriRL GRPO (ReLU CLIP)](https://api.wandb.ai/links/supreethrao/cdpml221)
+- W&B run logs: [zn6azp6t](https://wandb.ai/supreethrao/verirl-grpo/runs/zn6azp6t?nw=nwusersupreethrao)
 
 ---
 
