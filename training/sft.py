@@ -193,6 +193,10 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         random_state=42,
     )
 
+    # TRL 0.24 removed max_seq_length from both SFTConfig and SFTTrainer.
+    # With packing=True, pack length is read from tokenizer.model_max_length.
+    tokenizer.model_max_length = config.sft_max_seq_length
+
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
     print(f"[SFT] base_model  = {config.sft_base_model}")
@@ -203,7 +207,6 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         model=model,
         processing_class=tokenizer,  # TRL 0.15+: renamed from tokenizer
         train_dataset=dataset,
-        max_seq_length=config.sft_max_seq_length,  # TRL 0.15+: on SFTTrainer, not SFTConfig
         args=SFTConfig(
             output_dir=output_dir,
             per_device_train_batch_size=config.sft_per_device_batch_size,
