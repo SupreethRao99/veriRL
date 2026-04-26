@@ -194,6 +194,56 @@ def cmd_train(
     )
 
 
+def cmd_eval(
+    flavor: str,
+    timeout: str,
+    git_ref: str,
+    grpo_model: str | None,
+    n_runs: int,
+    dry_run: bool,
+) -> int:
+    """Submit the model comparison evaluation job to HF Jobs (single L4).
+
+    Runs Base → SFT → GRPO inference on the three easy tasks and prints a
+    markdown score table. Requires ``VERIRL_ENV_URL`` to point at the deployed
+    VeriRL environment (HF Space or equivalent).
+
+    Args:
+        flavor: HF Jobs hardware flavor (default: ``l4-small``).
+        timeout: Job timeout string.
+        git_ref: Git branch or commit SHA to run.
+        grpo_model: HF repo ID of the GRPO checkpoint, or ``None`` to use the default.
+        n_runs: Number of episodes per (model, task) pair.
+        dry_run: If ``True``, print without submitting.
+
+    Returns:
+        The ``hf`` CLI return code, or 1 if ``VERIRL_ENV_URL`` is not set.
+    """
+    env_url = os.environ.get("VERIRL_ENV_URL", "").strip()
+    if not env_url:
+        print(
+            "ERROR: VERIRL_ENV_URL is not set.\n"
+            "Set it to your deployed VeriRL env server, e.g.:\n"
+            "  export VERIRL_ENV_URL=https://<username>-verirl-env.hf.space",
+            file=sys.stderr,
+        )
+        return 1
+    env: dict[str, str] = {
+        "VERIRL_ENV_URL": env_url,
+        "VERIRL_GIT_REF": git_ref,
+        "EVAL_N_RUNS": str(n_runs),
+    }
+    if grpo_model:
+        env["VERIRL_GRPO_MODEL"] = grpo_model
+    return _submit(
+        script_url=_raw_url(git_ref, "training/hf_eval_models.py"),
+        flavor=flavor,
+        timeout=timeout,
+        env=env,
+        dry_run=dry_run,
+    )
+
+
 def cmd_ps(dry_run: bool) -> int:
     """List all running HF Jobs.
 
@@ -249,6 +299,15 @@ def _build_parser() -> argparse.ArgumentParser:
     logs_p = sub.add_parser("logs", help="Tail logs for a job")
     logs_p.add_argument("job_id", help="Job ID from `hf_jobs.py ps`")
 
+    eval_p = sub.add_parser("eval", help="Base vs SFT vs GRPO comparison on easy tasks (1×L4)")
+    eval_p.add_argument("--flavor", default="a10g-large", help="HF Jobs hardware flavor")
+    eval_p.add_argument("--timeout", default="4h")
+    eval_p.add_argument("--git-ref", default=_BRANCH_DEFAULT)
+    eval_p.add_argument("--grpo-model", default=None,
+                        help="HF repo ID of the GRPO checkpoint (overrides default)")
+    eval_p.add_argument("--n-runs", type=int, default=3,
+                        help="Episodes per (model, task) pair (default: 3)")
+
     return p
 
 
@@ -261,6 +320,11 @@ if __name__ == "__main__":
         sys.exit(cmd_train(
             args.flavor, args.timeout, args.git_ref,
             args.resume_from_checkpoint, args.dry_run,
+        ))
+    elif args.command == "eval":
+        sys.exit(cmd_eval(
+            args.flavor, args.timeout, args.git_ref,
+            args.grpo_model, args.n_runs, args.dry_run,
         ))
     elif args.command == "ps":
         sys.exit(cmd_ps(args.dry_run))
