@@ -163,6 +163,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     """
     # Unsloth is Linux/CUDA-only; import lazily so this module stays importable
     # on macOS and other non-CUDA environments.
+    from transformers import AutoTokenizer
     from unsloth import FastLanguageModel
 
     if wandb_key:
@@ -193,9 +194,14 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
         random_state=42,
     )
 
-    # TRL 0.24 removed max_seq_length from both SFTConfig and SFTTrainer.
-    # With packing=True, pack length is read from tokenizer.model_max_length.
+    # Use Unsloth tokenizer for apply_chat_template (dataset formatting) but
+    # pass a plain AutoTokenizer to SFTTrainer: Unsloth freezes eos_token to a
+    # placeholder that TRL 0.24 rejects during its unconditional eos validation.
+    # Both tokenizers share the same Qwen3 vocabulary so tokenization is identical.
     tokenizer.model_max_length = config.sft_max_seq_length
+    sft_tokenizer = AutoTokenizer.from_pretrained(
+        config.sft_base_model, token=hf_token, model_max_length=config.sft_max_seq_length
+    )
 
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
@@ -205,7 +211,7 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
 
     trainer = SFTTrainer(
         model=model,
-        processing_class=tokenizer,  # TRL 0.15+: renamed from tokenizer
+        processing_class=sft_tokenizer,
         train_dataset=dataset,
         args=SFTConfig(
             output_dir=output_dir,
