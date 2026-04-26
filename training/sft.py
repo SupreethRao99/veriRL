@@ -196,6 +196,10 @@ def run_sft(config, hf_token: str, wandb_key: str | None, output_dir: str) -> di
     # TRL 0.24 removed max_seq_length from both SFTConfig and SFTTrainer.
     # With packing=True, pack length is read from tokenizer.model_max_length.
     tokenizer.model_max_length = config.sft_max_seq_length
+    # TRL 0.24 validates eos_token when packing=True. Unsloth may leave a
+    # placeholder <EOS_TOKEN> that isn't in Qwen3's vocab; pin to the real one.
+    if tokenizer.eos_token not in tokenizer.get_vocab():
+        tokenizer.eos_token = "<|im_end|>"
 
     dataset = load_sft_dataset(tokenizer, max_samples=config.sft_max_samples)
     print(f"[SFT] Dataset: {len(dataset)} samples after filtering")
