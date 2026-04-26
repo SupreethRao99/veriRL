@@ -104,6 +104,9 @@ def load_model_and_tokenizer(config, hf_token: str):
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # SFT sets tokenizer.model_max_length=2048 for packing; reset to the actual
+    # GRPO context window so transformers doesn't warn on longer rollouts.
+    tokenizer.model_max_length = config.max_model_length
 
     tokenizer.response_schema = qwen3_schema
     tokenizer.chat_template = qwen3_training_chat_template
