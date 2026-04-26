@@ -1,3 +1,6 @@
+## [0.7.3] - 2026-04-26
+No significant changes.
+
 ## [0.7.2] - 2026-04-26
 
 Documentation
